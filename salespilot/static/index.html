@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SalesPilot — AI Sales Assistant</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div id="app">
+  <!-- Sidebar Navigation -->
+  <nav id="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-mark">SP</span>
+      <span class="logo-text">SalesPilot</span>
+    </div>
+    <div class="sidebar-section">
+      <button class="nav-btn active" data-view="chat" onclick="switchView('chat')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        Customer Chat
+      </button>
+      <button class="nav-btn" data-view="dashboard" onclick="switchView('dashboard')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Sales Dashboard
+      </button>
+      <button class="nav-btn" data-view="customer" onclick="switchView('customer')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Opportunity View
+      </button>
+      <button class="nav-btn" data-view="cases" onclick="switchView('cases')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        HITL Cases
+        <span class="nav-badge hidden" id="caseBadge">0</span>
+      </button>
+    </div>
+    <div class="sidebar-section sidebar-bottom">
+      <div class="provider-info">
+        <div class="provider-label">Backend</div>
+        <div id="providerStatus" class="provider-value">Connecting…</div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main id="main">
+
+    <!-- ===== CHAT VIEW ===== -->
+    <section id="view-chat" class="view active">
+      <div class="chat-layout">
+        <!-- Chat Column -->
+        <div class="chat-col">
+          <div class="chat-header">
+            <div class="chat-customer-info">
+              <div class="avatar" id="chatAvatar">C</div>
+              <div>
+                <input type="text" id="chatCustomerName" class="chat-name-input" value="Sarah" placeholder="Customer name">
+                <input type="text" id="chatCustomerId" class="chat-id-input" value="C-1024" placeholder="Customer ID">
+              </div>
+            </div>
+            <div class="chat-header-actions">
+              <button class="btn-secondary" onclick="newCustomer()">+ New Customer</button>
+              <button class="btn-secondary" onclick="resetConversation()">Reset</button>
+            </div>
+          </div>
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-empty">Start a conversation to see SalesPilot in action.<br><br>Try: "I want to learn about health insurance."</div>
+          </div>
+          <div class="chat-input-bar">
+            <input type="text" id="chatInput" class="chat-input" placeholder="Type a customer message…" onkeydown="if(event.key==='Enter')sendMessage()">
+            <button class="btn-send" onclick="sendMessage()">Send</button>
+          </div>
+        </div>
+
+        <!-- Sales Intelligence Panel -->
+        <aside class="sales-panel" id="salesPanel">
+          <div class="panel-header">SALES INTELLIGENCE</div>
+          <div class="panel-body">
+            <div id="panelEmpty" class="panel-empty">Send a message to see the opportunity profile.</div>
+            <div id="panelContent" class="hidden">
+              <div class="panel-row">
+                <span class="panel-label">CUSTOMER</span>
+                <span class="panel-value" id="pCustomer">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">STATE</span>
+                <span class="panel-value" id="pState">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">PURCHASE INTENT</span>
+                <span class="panel-value" id="pPurchaseIntent">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">KEY SIGNALS</span>
+                <span class="panel-value signal-tags" id="pSignals">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">OPPORTUNITY SCORE</span>
+                <span class="panel-value score-bar" id="pScore">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">PRIORITY</span>
+                <span class="panel-value" id="pPriority">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">MAIN CONCERN</span>
+                <span class="panel-value" id="pConcern">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">COMPETITIVE RISK</span>
+                <span class="panel-value" id="pCompRisk">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">EXPANSION OPPORTUNITY</span>
+                <span class="panel-value" id="pExpansion">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">NEXT BEST ACTION</span>
+                <span class="panel-value" id="pNBA">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">HUMAN INTERVENTION</span>
+                <span class="panel-value" id="pHuman">—</span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">EXTRACTION SOURCE</span>
+                <span class="panel-value" id="pSource">—</span>
+              </div>
+              <div id="takeoverBanner" class="takeover-banner hidden">
+                <div class="takeover-title">HUMAN INTERVENTION REQUIRED</div>
+                <div class="takeover-reason" id="takeoverReason">—</div>
+                <div class="takeover-action" id="takeoverAction">—</div>
+                <button class="btn-takeover" id="takeoverBtn" onclick="executeTakeover()">TAKE OVER</button>
+              </div>
+              <div id="takeoverActive" class="takeover-active hidden">
+                <div class="takeover-active-title">Human Handling Active</div>
+                <div class="takeover-active-desc">AI autonomous sales actions are paused. Conversation is still logged.</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ===== DASHBOARD VIEW ===== -->
+    <section id="view-dashboard" class="view">
+      <div class="view-header">
+        <h1>Sales Dashboard</h1>
+        <button class="btn-secondary" onclick="loadDashboard()">Refresh</button>
+      </div>
+      <div class="dash-cards" id="dashCards">
+        <div class="dash-card dash-high"><div class="dash-card-num" id="dashHigh">0</div><div class="dash-card-label">HIGH</div></div>
+        <div class="dash-card dash-medium"><div class="dash-card-num" id="dashMedium">0</div><div class="dash-card-label">MEDIUM</div></div>
+        <div class="dash-card dash-low"><div class="dash-card-num" id="dashLow">0</div><div class="dash-card-label">LOW</div></div>
+      </div>
+      <div class="dash-table-wrap">
+        <table class="dash-table" id="dashTable">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>State</th>
+              <th>Score</th>
+              <th>Signals</th>
+              <th>Priority</th>
+              <th>Next Action</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="dashBody">
+            <tr><td colspan="7" class="table-empty">No opportunities yet. Send messages in the Customer Chat or seed demo data.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dash-actions">
+        <button class="btn-secondary" onclick="seedDemoData()">Seed Demo Data</button>
+      </div>
+    </section>
+
+    <!-- ===== CUSTOMER DETAIL VIEW ===== -->
+    <section id="view-customer" class="view">
+      <div class="view-header">
+        <h1>Customer Opportunity View</h1>
+        <div class="cust-selector">
+          <select id="custSelect" onchange="loadCustomerDetail()"></select>
+        </div>
+      </div>
+      <div id="custDetail" class="cust-detail">
+        <div class="cust-empty">Select a customer to view their opportunity profile.</div>
+      </div>
+    </section>
+
+    <!-- ===== HITL CASES VIEW ===== -->
+    <section id="view-cases" class="view">
+      <div class="view-header">
+        <h1>HITL Cases</h1>
+        <button class="btn-secondary" onclick="loadCases()">Refresh</button>
+      </div>
+      <div class="cases-container" id="casesContainer">
+        <div class="cases-empty">No HITL cases. Cases appear here when human intervention is triggered.</div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
