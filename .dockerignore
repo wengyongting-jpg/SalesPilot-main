@@ -1,7 +1,51 @@
-__pycache__
-*.pyc
+# Secrets - never include these in a Docker build context or image
+.env
+.env.*
+.envrc
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python environments, caches and test artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local runtime data - production data must be mounted or injected separately
 runtime/
 logs/
+*.sqlite
+*.sqlite3
+*.db
+
+# Repository, development tooling and non-runtime material
 .git/
-*.egg-info
-.env
+.github/
+.idea/
+.vscode/
+.kiro/
+tests/
+docs/
+README.md
+AGENTS.md
+
+# Operating-system generated files
+.DS_Store
+._*
+Icon?
+.Spotlight-V100/
+.Trashes/
+Thumbs.db
+ehthumbs.db
+Desktop.ini
