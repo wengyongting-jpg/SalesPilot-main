@@ -643,5 +643,36 @@ class TestNonTakeoverLifecycle(unittest.TestCase):
         self.assertEqual(r_re.opportunity.state, OpportunityState.POTENTIAL_INTEREST)
 
 
+class TestSafePatternDoesNotSuppressEscalation(unittest.TestCase):
+    """Regression: a message containing a 'safe pattern' phrase (e.g. 'tell me
+    about') must still escalate when it also carries an explicit human
+    request, complaint, negotiation, or compliance-risk signal. The safe
+    patterns exist only to avoid escalating on low retrieval confidence for
+    generic questions — they must never suppress these explicit signals."""
+
+    def test_human_request_with_safe_pattern_still_escalates(self):
+        agent = SalesPilotAgent()
+        r = agent.handle_message(
+            "C-SAFE1", "T",
+            "Can you tell me about the plans, I'd like to speak to a human",
+        )
+        self.assertIn(Signal.HUMAN_REQUEST, r.detection.signals)
+        self.assertIsNotNone(
+            r.case, "Explicit human request must escalate even with a 'safe pattern' phrase",
+        )
+
+    def test_complaint_with_safe_pattern_still_escalates(self):
+        agent = SalesPilotAgent()
+        agent.handle_message("C-SAFE2", "T", "What plans do you have?")
+        r = agent.handle_message(
+            "C-SAFE2", "T",
+            "I want to learn about your complaint process, I have a complaint",
+        )
+        self.assertEqual(r.detection.intent, Intent.COMPLAINT)
+        self.assertIsNotNone(
+            r.case, "Complaint must escalate even with a 'safe pattern' phrase",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -188,7 +188,7 @@ class PriorityEngine:
     def _expansion_score(det: Detection, signals: set[Signal]) -> int:
         """None=0, possible=5, family/upgrade=8-10, multiple/corporate=11-15."""
         if Signal.EXPANSION_CORPORATE in signals:
-            return 13
+            return 15
         if Signal.EXPANSION_FAMILY in signals:
             return 10
         if det.intent == Intent.FAMILY_NEED:

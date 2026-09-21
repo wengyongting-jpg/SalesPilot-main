@@ -20,6 +20,7 @@ from ..models import (
     NextBestAction,
     Opportunity,
     OpportunityState,
+    Product,
     RetrievalResult,
     Signal,
 )
@@ -75,7 +76,7 @@ class ResponseGenerator:
             return _GENERIC_HELP
 
         # Unknown product: return the approved four-plan overview
-        if opp.product.name == "UNKNOWN":
+        if opp.product == Product.UNKNOWN:
             lines = retrieval.facts
             return (
                 "Sure, here is a quick overview of the CareSure plans:\n"

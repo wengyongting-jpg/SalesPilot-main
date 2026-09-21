@@ -83,6 +83,11 @@ def _signal_summary(opp) -> str:
         "Competitive": "Competitive",
         "Expansion: Family": "FamilyExp",
         "Expansion: Corporate": "CorpExp",
+        "Human Request": "HumanReq",
+        "Compliance Risk": "ComplianceRisk",
+        "Negotiation": "Negotiation",
+        "Conversion": "Converted",
+        "Withdrawal": "Withdrawn",
     }
     picked = [names[s.value] for s in opp.signals if s.value in names]
     return ("[" + "+".join(picked) + "]") if picked else ""

@@ -71,10 +71,6 @@ class HITLManager:
         text = latest_text.lower().strip()
         current_signals = set(det.signals)
 
-        # --- Safe patterns: never escalate ---
-        if any(p in text for p in _SAFE_PATTERNS):
-            return None
-
         # --- Explicit human request ---
         if Signal.HUMAN_REQUEST in current_signals:
             return "Customer explicitly asked to speak to a person"

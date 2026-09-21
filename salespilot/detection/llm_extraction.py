@@ -156,8 +156,12 @@ class LLMExtractor:
         concern = data.get("concern", "").strip()
         concerns = [concern] if concern else []
 
-        # Check restricted
-        restricted = Signal.COMPLIANCE_RISK in signals
+        # Check restricted (kept in sync with SignalDetector.detect's rule)
+        restricted = (
+            Signal.HUMAN_REQUEST in signals
+            or Signal.COMPLIANCE_RISK in signals
+            or Signal.NEGOTIATION in signals
+        )
 
         return ExtractionResult(
             intent=intent,

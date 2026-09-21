@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -75,25 +76,33 @@ class SqliteRepository(BaseRepository):
         if str(path) != ":memory:":
             path.parent.mkdir(parents=True, exist_ok=True)
         self.db_path = path
+        self._lock = threading.Lock()
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
-        # Migration: add signal_history column if missing (for existing DBs)
-        try:
-            self._conn.execute("ALTER TABLE opportunities ADD COLUMN signal_history TEXT NOT NULL DEFAULT '[]'")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-        # Migration: add best_intent column if missing (for existing DBs)
-        try:
-            self._conn.execute("ALTER TABLE opportunities ADD COLUMN best_intent TEXT NOT NULL DEFAULT 'generic'")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+
+        existing_columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(opportunities)")
+        }
+        if "signal_history" not in existing_columns:
+            self._conn.execute(
+                "ALTER TABLE opportunities ADD COLUMN signal_history TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "best_intent" not in existing_columns:
+            self._conn.execute(
+                "ALTER TABLE opportunities ADD COLUMN best_intent TEXT NOT NULL DEFAULT 'generic'"
+            )
         self._conn.commit()
 
     # ---- Opportunities ---------------------------------------------------
 
     def upsert_opportunity(self, opp: Opportunity) -> None:
         opp.updated_at = datetime.now()
+        with self._lock:
+            self._upsert_opportunity_locked(opp)
+
+    def _upsert_opportunity_locked(self, opp: Opportunity) -> None:
         self._conn.execute(
             """
             INSERT INTO opportunities (
@@ -170,50 +179,55 @@ class SqliteRepository(BaseRepository):
         self._conn.commit()
 
     def get_opportunity(self, opp_id: str) -> Optional[Opportunity]:
-        row = self._conn.execute(
-            "SELECT * FROM opportunities WHERE id = ?", (opp_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM opportunities WHERE id = ?", (opp_id,)
+            ).fetchone()
         return _row_to_opportunity(row) if row else None
 
     def list_opportunities(self) -> list[Opportunity]:
-        rows = self._conn.execute(
-            "SELECT * FROM opportunities ORDER BY updated_at ASC"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM opportunities ORDER BY updated_at ASC"
+            ).fetchall()
         return [_row_to_opportunity(row) for row in rows]
 
     def delete_opportunity(self, opp_id: str) -> None:
-        self._conn.execute("DELETE FROM opportunities WHERE id = ?", (opp_id,))
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM opportunities WHERE id = ?", (opp_id,))
+            self._conn.commit()
 
     # ---- HITL cases ------------------------------------------------------
 
     def add_case(self, case: HumanCase) -> None:
-        self._conn.execute(
-            """
-            INSERT OR REPLACE INTO cases (
-                id, opportunity_id, customer_name, state, product, reason,
-                summary, recommended_action, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                case.id,
-                case.opportunity_id,
-                case.customer_name,
-                case.state.value,
-                case.product.value,
-                case.reason,
-                case.summary,
-                case.recommended_action,
-                case.status.value,
-                case.created_at.isoformat(),
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO cases (
+                    id, opportunity_id, customer_name, state, product, reason,
+                    summary, recommended_action, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    case.id,
+                    case.opportunity_id,
+                    case.customer_name,
+                    case.state.value,
+                    case.product.value,
+                    case.reason,
+                    case.summary,
+                    case.recommended_action,
+                    case.status.value,
+                    case.created_at.isoformat(),
+                ),
+            )
+            self._conn.commit()
 
     def list_cases(self) -> list[HumanCase]:
-        rows = self._conn.execute(
-            "SELECT * FROM cases ORDER BY created_at ASC"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM cases ORDER BY created_at ASC"
+            ).fetchall()
         return [_row_to_case(row) for row in rows]
 
     # ---- Lifecycle -------------------------------------------------------
