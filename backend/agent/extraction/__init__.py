@@ -7,3 +7,88 @@ classifiers as an exception handler and the two drifted until the prompt offered
 the model enum values the domain did not accept -- a defect that silently
 disabled three HITL triggers. A declared shared contract is the fix.
 """
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Literal, Optional, Protocol
+
+from ...domain.detection import Detection, HandoffProposal
+from ...domain.message import Message
+from ...observability import RunRecorder
+from . import rules
+
+
+@dataclass
+class ExtractionOutcome:
+    """What one extraction call produced, and how.
+
+    `source`, `violation` and `unavailable` exist so a caller (eventually
+    `services`) can report a degraded run without inspecting the detection for
+    clues -- exactly the distinction `docs/backend-plan.md` §7 draws between
+    "model unavailable" (`unavailable`) and "model wrong" (`violation`).
+
+    `handoff` is the model's proposal, if it made one; the kernel decides.
+    `trace` is the framework's own message list from a model run, kept opaque
+    here so the reply peer can continue the same conversation.
+    """
+
+    detection: Detection
+    source: Literal["llm", "rule"]
+    violation: Optional[str] = None
+    unavailable: Optional[str] = None
+    handoff: Optional[HandoffProposal] = None
+    trace: list[Any] = field(default_factory=list)
+
+
+class Extractor(Protocol):
+    def extract(
+        self,
+        text: str,
+        context: Optional[list[Message]] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
+    ) -> ExtractionOutcome: ...
+
+
+class RuleExtractor:
+    """The offline peer: always available, never calls a model."""
+
+    def extract(
+        self,
+        text: str,
+        context: Optional[list[Message]] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
+    ) -> ExtractionOutcome:
+        if recorder is None:
+            return ExtractionOutcome(detection=rules.extract(text, context), source="rule")
+        with recorder.step("extraction", "rule") as step:
+            detection = rules.extract(text, context)
+            step.note(f"intent={detection.intent.value} product={detection.product.value}")
+        return ExtractionOutcome(detection=detection, source="rule")
+
+
+class ModelExtractor:
+    """The model-based peer. Falls back to the rule peer when the model is
+    unavailable or wrong, and says which."""
+
+    def __init__(self, model) -> None:
+        self._model = model
+
+    def extract(
+        self,
+        text: str,
+        context: Optional[list[Message]] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
+    ) -> ExtractionOutcome:
+        from . import model_based
+
+        return model_based.extract(text, context, model=self._model, recorder=recorder)
+
+
+def build_extractor(model=None) -> Extractor:
+    """`model=None` selects the offline (rule-based) peer."""
+    if model is None:
+        return RuleExtractor()
+    return ModelExtractor(model)

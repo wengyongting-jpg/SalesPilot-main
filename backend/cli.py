@@ -41,8 +41,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.probe:
         _print_configuration()
-        # Reachability probing lands with providers/probe.py in P3.
-        print("  model reachability   not implemented yet (phase P3)")
+        from .observability import logging as run_logging
+        from .providers.probe import probe
+
+        run_logging.configure()  # proves the log location is writable before serving
+        result = probe()
+        reachable = result["reachable"]
+        status = "n/a" if reachable is None else ("yes" if reachable else "no")
+        print(f"  model reachability   {status} — {result['detail']}")
         return 0
 
     if args.serve or args.demo or args.seed:

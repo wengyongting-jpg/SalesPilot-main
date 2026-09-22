@@ -115,7 +115,10 @@ def describe() -> dict[str, object]:
         "api_base": LLM_API_BASE or "(provider default)",
         "api_key": "set" if LLM_API_KEY else "absent",
         "telemetry_content": "on" if TELEMETRY_CONTENT else "off",
+        "telemetry_content_max": TELEMETRY_CONTENT_MAX_CHARS,
         "console_trace": "on" if CONSOLE_TRACE else "off",
+        "console_colour": "on" if CONSOLE_COLOUR else "off",
+        "log_file": str(LOG_FILE),
         "knowledge_base": str(KB_PATH),
         "database": str(DEFAULT_DB_PATH),
     }
