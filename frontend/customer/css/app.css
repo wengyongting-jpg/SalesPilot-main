@@ -331,6 +331,58 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Markdown formatting in AI messages */
+.bubble__text .message-paragraph {
+  margin: 0 0 0.5em 0;
+}
+
+.bubble__text .message-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.bubble__text .message-list {
+  margin: 0.5em 0;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+
+.bubble__text .message-list li {
+  margin: 0.25em 0;
+  padding-left: 0.3em;
+}
+
+.bubble__text .message-section {
+  margin: 0.75em 0;
+  padding: 0.5em 0.75em;
+  background: rgba(0, 0, 0, 0.05);
+  border-left: 3px solid var(--c-accent);
+  border-radius: 4px;
+}
+
+.bubble--in .bubble__text .message-section {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.bubble__text .message-section-label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--c-accent);
+  margin-bottom: 0.3em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bubble__text .message-section-text {
+  display: block;
+  font-size: 0.95em;
+  opacity: 0.9;
+}
+
+.bubble__text strong {
+  font-weight: 600;
+}
+
 .bubble--in .bubble__text {
   padding-right: var(--meta-reserve-in);
 }

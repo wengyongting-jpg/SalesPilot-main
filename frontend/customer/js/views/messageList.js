@@ -12,12 +12,15 @@
  *
  * All text is written with `textContent`. Message bodies, and later
  * knowledge-base facts, are untrusted data and are never treated as markup.
+ * Exception: AI-generated messages may contain Markdown formatting which is
+ * parsed into safe DOM structure (no innerHTML).
  */
 import { config } from '../config.js';
 import { strings } from '../strings.js';
 import { icons } from '../icons.js';
 import { isEmojiOnly } from '../emoji.js';
 import { messageKey } from '../store.js';
+import { parseMessageMarkdown, hasMarkdownFormatting } from '../markdown.js';
 import {
   formatTime,
   dayLabelKind,
@@ -227,8 +230,15 @@ export function createMessageList({
 
     const text = document.createElement('div');
     text.className = 'bubble__text';
-    // Untrusted content: text only, and no linkification (requirements 1.7, 1.9).
-    text.textContent = message.text;
+
+    // AI messages may contain Markdown formatting - parse it into safe DOM
+    // Customer messages are always plain text (requirements 1.7, 1.9)
+    if (message.direction === 'in' && message.author === 'ai' && hasMarkdownFormatting(message.text)) {
+      text.appendChild(parseMessageMarkdown(message.text));
+    } else {
+      // Untrusted content: text only, and no linkification
+      text.textContent = message.text;
+    }
 
     const meta = document.createElement('div');
     meta.className = 'bubble__meta';
