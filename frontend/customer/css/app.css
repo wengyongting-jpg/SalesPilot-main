@@ -1,0 +1,702 @@
+/* =============================================================================
+   Component rules — customer chat
+   Consumes tokens from tokens.css. No literal colours, sizes or durations that
+   ought to be tokens.
+
+   Bubble geometry, tick placement and grouping follow generic messaging
+   conventions. This is deliberately NOT a WhatsApp clone: no WhatsApp logo,
+   wordmark, WhatsApp Sans font or WhatsApp notification sound.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--c-backdrop);
+  font: var(--t-body);
+  color: var(--c-bubble-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible focus indicator on every interactive control. */
+:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+/* =============================================================================
+   Scrollbars — shared treatment with the admin console.
+   A thin floating thumb, no track, no frame.
+   ========================================================================== */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* =============================================================================
+   1. Phone frame (ux-spec §1)
+   ========================================================================== */
+
+.phone-frame {
+  display: flex;
+  flex-direction: column;
+  width: var(--frame-width);
+  height: var(--frame-height);
+  margin: max(0px, calc((100vh - var(--frame-height)) / 2)) auto;
+  overflow: hidden;
+  background: var(--c-chat-bg);
+  border-radius: var(--frame-radius);
+  box-shadow: var(--frame-shadow);
+}
+
+/* Tablet: 600-899px */
+@media (max-width: 899px) {
+  .phone-frame {
+    width: 100%;
+    max-width: 520px;
+    height: 100vh;
+    margin: 0 auto;
+    border-radius: 16px;
+    box-shadow: none;
+  }
+}
+
+/* Mobile: < 600px. 100dvh keeps the composer visible when the on-screen
+   keyboard appears, without position: fixed. */
+@media (max-width: 599px) {
+  .phone-frame {
+    max-width: none;
+    height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+/* =============================================================================
+   2. Header
+   ========================================================================== */
+
+.chat-header {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-5);
+  align-items: center;
+  height: var(--header-height);
+  padding: 0 var(--sp-5);
+  color: var(--c-header-text);
+  background: var(--c-header);
+}
+
+.avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  font: var(--t-header-name);
+  color: var(--c-accent);
+  background: var(--c-input-bg);
+  border-radius: 50%;
+}
+
+.chat-header__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chat-header__name {
+  font: var(--t-header-name);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The AI disclosure line. Must never be empty while the AI is answering. */
+.chat-header__status {
+  font: var(--t-header-status);
+  opacity: 0.85;
+}
+
+.chat-header__actions {
+  display: flex;
+  gap: var(--sp-3);
+  margin-left: auto;
+}
+
+.header-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--c-header-text);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+}
+
+.header-btn:hover {
+  background: rgb(255 255 255 / 0.15);
+}
+
+/* =============================================================================
+   3. Banners
+   ========================================================================== */
+
+.banner-stack {
+  flex: 0 0 auto;
+}
+
+.banner {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: var(--sp-4) var(--sp-5);
+  font: var(--t-header-status);
+  animation: banner-in var(--dur-base) var(--ease-in-out);
+}
+
+.banner--offline {
+  color: var(--c-warning-text);
+  background: var(--c-warning-bg);
+}
+
+.banner--handoff {
+  color: var(--c-handoff-text);
+  background: var(--c-handoff-bg);
+}
+
+.banner__icon {
+  flex: 0 0 auto;
+}
+
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* =============================================================================
+   4. Message area and list
+   ========================================================================== */
+
+.message-area {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.message-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: var(--list-pad-y) var(--list-pad-x);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: var(--scroll-behavior);
+  background: var(--c-chat-bg);
+}
+
+/* Empty / loading / error states occupy the free space above the items. */
+.message-list__states:not(:empty) {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  padding: var(--sp-6);
+}
+
+.message-list__items {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  margin-top: auto;
+}
+
+/* =============================================================================
+   5. Bubbles
+   ========================================================================== */
+
+.bubble {
+  position: relative;
+  max-width: var(--bubble-max-width);
+  padding: var(--bubble-pad-y) var(--bubble-pad-x);
+  margin-top: var(--bubble-gap-grouped);
+  font: var(--t-body);
+  color: var(--c-bubble-text);
+  border-radius: var(--bubble-radius);
+  box-shadow: var(--c-bubble-shadow);
+  animation: bubble-in var(--dur-base) var(--ease-out);
+}
+
+/* First bubble of a run gets the extra gap and the tail. */
+.bubble--lead {
+  margin-top: var(--bubble-gap-new-sender);
+}
+
+.bubble--in {
+  align-self: flex-start;
+  background: var(--c-bubble-in);
+}
+
+.bubble--out {
+  align-self: flex-end;
+  background: var(--c-bubble-out);
+}
+
+.bubble--in.bubble--lead {
+  border-top-left-radius: 0;
+}
+
+.bubble--out.bubble--lead {
+  border-top-right-radius: 0;
+}
+
+/* Tail: a small triangle at the top outer corner, colour-matched. */
+.bubble--lead::before {
+  position: absolute;
+  top: 0;
+  width: var(--tail-width);
+  height: var(--tail-height);
+  content: '';
+}
+
+.bubble--in.bubble--lead::before {
+  left: calc(var(--tail-width) * -1);
+  background: var(--c-bubble-in);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+}
+
+.bubble--out.bubble--lead::before {
+  right: calc(var(--tail-width) * -1);
+  background: var(--c-bubble-out);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
+/* Body text. Reserve trailing room so the inline timestamp cannot overlap the
+   last word (ux-spec §4). `pre-wrap` preserves author line breaks. */
+.bubble__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble--in .bubble__text {
+  padding-right: var(--meta-reserve-in);
+}
+
+.bubble--out .bubble__text {
+  padding-right: var(--meta-reserve-out);
+}
+
+/* Inline metadata pinned bottom-right. */
+.bubble__meta {
+  position: absolute;
+  right: var(--bubble-pad-x);
+  bottom: var(--bubble-pad-y);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  font: var(--t-meta);
+  color: var(--c-bubble-meta);
+}
+
+.bubble__time {
+  font: var(--t-meta);
+  color: var(--c-bubble-meta);
+}
+
+/* Emoji-only message: enlarged, no bubble background (ux-spec §3). */
+.bubble--emoji {
+  background: none;
+  box-shadow: none;
+}
+
+.bubble--emoji::before {
+  display: none;
+}
+
+.bubble--emoji .bubble__text {
+  font-family: var(--font-emoji);
+  font-size: var(--size-emoji-only);
+  line-height: 1.2;
+}
+
+/* =============================================================================
+   6. Ticks
+   ========================================================================== */
+
+.tick {
+  display: inline-flex;
+  align-items: center;
+  transition: opacity var(--dur-instant) linear;
+}
+
+.tick--sending,
+.tick--sent {
+  color: var(--c-bubble-meta);
+}
+
+.tick--read {
+  color: var(--c-tick-read);
+}
+
+.tick--failed {
+  color: var(--c-danger);
+}
+
+/* Retry sits beneath the failed bubble. The customer's own words stay at full
+   opacity — a failed send never dims what they wrote. */
+.retry {
+  align-self: flex-end;
+  padding: var(--sp-1) var(--sp-3);
+  margin-top: var(--sp-1);
+  font: var(--t-meta);
+  color: var(--c-danger);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--chip-radius);
+}
+
+.retry:hover {
+  background: rgb(211 47 47 / 0.08);
+}
+
+/* =============================================================================
+   7. Date separator and system message
+   ========================================================================== */
+
+.separator,
+.system-message {
+  align-self: center;
+  max-width: 85%;
+  padding: var(--sp-2) var(--sp-5);
+  margin: var(--sp-6) auto;
+  font: var(--t-separator);
+  border-radius: var(--chip-radius);
+  box-shadow: var(--c-bubble-shadow);
+}
+
+.separator {
+  color: var(--c-separator-text);
+  text-align: center;
+  background: var(--c-separator-bg);
+  text-transform: uppercase;
+}
+
+.system-message {
+  color: var(--c-system-text);
+  text-align: left;
+  background: var(--c-system-bg);
+}
+
+/* =============================================================================
+   8. Typing indicator
+   ========================================================================== */
+
+.typing {
+  align-self: flex-start;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--bubble-pad-y) var(--bubble-pad-x);
+  margin-top: var(--bubble-gap-new-sender);
+  background: var(--c-bubble-in);
+  border-radius: var(--bubble-radius);
+  box-shadow: var(--c-bubble-shadow);
+}
+
+.typing__dot {
+  width: 7px;
+  height: 7px;
+  background: var(--c-bubble-meta);
+  border-radius: 50%;
+  animation: typing-pulse var(--dur-typing) infinite var(--ease-in-out);
+}
+
+.typing__dot:nth-child(2) {
+  animation-delay: 160ms;
+}
+
+.typing__dot:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+@keyframes typing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Reduced motion: static dots rather than an animation (ux-spec §6). */
+@media (prefers-reduced-motion: reduce) {
+  .typing__dot {
+    opacity: 0.6;
+    animation: none;
+  }
+}
+
+/* =============================================================================
+   9. Jump to latest
+   ========================================================================== */
+
+.jump-slot {
+  position: absolute;
+  right: var(--sp-6);
+  bottom: var(--sp-6);
+  pointer-events: none;
+}
+
+.jump-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--c-bubble-meta);
+  pointer-events: auto;
+  cursor: pointer;
+  background: var(--c-input-bg);
+  border: 0;
+  border-radius: 50%;
+  box-shadow: var(--c-bubble-shadow), 0 2px 6px rgb(11 20 26 / 0.15);
+  animation: jump-in var(--dur-fast) var(--ease-out);
+}
+
+.jump-btn__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--sp-2);
+  font: var(--t-meta);
+  color: var(--c-header-text);
+  text-align: center;
+  background: var(--c-accent);
+  border-radius: var(--chip-radius);
+}
+
+@keyframes jump-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+/* =============================================================================
+   10. Quick replies (populated in task 5)
+   ========================================================================== */
+
+.quick-replies {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-3);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.quick-replies:not(:empty) {
+  padding: var(--sp-4) var(--sp-5) 0;
+}
+
+/* =============================================================================
+   11. Composer
+   ========================================================================== */
+
+.composer {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-4);
+  align-items: flex-end;
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--c-composer-bg);
+}
+
+.composer__input {
+  flex: 1 1 auto;
+  max-height: calc(20px * 5 + var(--sp-4) * 2);
+  padding: var(--sp-4) var(--sp-5);
+  font: var(--t-body);
+  color: var(--c-bubble-text);
+  resize: none;
+  background: var(--c-input-bg);
+  border: 0;
+  border-radius: var(--chip-radius);
+  outline-offset: 0;
+}
+
+.composer__input::placeholder {
+  color: var(--c-bubble-meta);
+}
+
+.composer__send {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: var(--c-header-text);
+  cursor: pointer;
+  background: var(--c-accent);
+  border: 0;
+  border-radius: 50%;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.composer__send:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.composer__send-glyph {
+  display: grid;
+  place-items: center;
+  animation: glyph-swap var(--dur-fast) var(--ease-out);
+}
+
+@keyframes glyph-swap {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+/* =============================================================================
+   12. Empty, loading and error states (ux-spec §7)
+   ========================================================================== */
+
+.state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  align-items: center;
+  max-width: 280px;
+  text-align: center;
+}
+
+.state__avatar {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  font: var(--t-card-title);
+  color: var(--c-accent);
+  background: var(--c-input-bg);
+  border-radius: 50%;
+  box-shadow: var(--c-bubble-shadow);
+}
+
+.state__title {
+  font: var(--t-card-title);
+}
+
+.state__body {
+  font: var(--t-body);
+  color: var(--c-bubble-meta);
+}
+
+.state__action {
+  padding: var(--sp-3) var(--sp-5);
+  font: var(--t-chip);
+  color: var(--c-accent);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--chip-radius);
+}
+
+/* Loading skeleton: three placeholder bubbles, no spinner over an empty list. */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  width: 100%;
+}
+
+.skeleton__bubble {
+  height: 34px;
+  background: var(--c-bubble-in);
+  border-radius: var(--bubble-radius);
+  opacity: 0.6;
+  animation: skeleton-pulse var(--dur-slow) infinite alternate var(--ease-in-out);
+}
+
+.skeleton__bubble--in {
+  align-self: flex-start;
+  width: 60%;
+}
+
+.skeleton__bubble--out {
+  align-self: flex-end;
+  width: 45%;
+}
+
+.skeleton__bubble--in-wide {
+  align-self: flex-start;
+  width: 70%;
+}
+
+@keyframes skeleton-pulse {
+  to {
+    opacity: 0.9;
+  }
+}

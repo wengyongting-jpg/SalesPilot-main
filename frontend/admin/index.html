@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Title set from config/strings at boot so branding lives in one place. -->
+<title>Console</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!--
+  Static shell only. Every mount point is filled by a view module.
+  No inline styles, no inline event handlers.
+-->
+<div class="console">
+
+  <nav class="nav" id="nav" aria-label="Console sections"></nav>
+
+  <main class="main" id="main">
+
+    <!-- ===== INBOX ===== -->
+    <section class="route" id="route-inbox" data-route="inbox">
+      <div class="inbox">
+        <aside class="inbox__list" id="inboxList" aria-label="Conversations"></aside>
+        <div class="inbox__center">
+          <header class="conv-header" id="convHeader"></header>
+          <div class="conv-transcript" id="convTranscript"></div>
+          <div class="conv-composer" id="convComposer"></div>
+        </div>
+        <aside class="inbox__side" id="inboxSide">
+          <div class="panel-tabs" id="panelTabs"></div>
+          <div class="panel-body">
+            <div class="panel" id="panelIntelligence"></div>
+            <div class="panel" id="panelObservability"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ===== CASES ===== -->
+    <section class="route" id="route-cases" data-route="cases">
+      <div class="route__inner" id="casesRoot"></div>
+    </section>
+
+    <!-- ===== HARNESS ===== -->
+    <section class="route" id="route-harness" data-route="harness">
+      <div class="harness">
+        <aside class="harness__debug" id="harnessDebug"></aside>
+        <div class="harness__device" id="harnessDevice"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

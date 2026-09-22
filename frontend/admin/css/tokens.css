@@ -1,0 +1,135 @@
+/* =============================================================================
+   Design tokens — admin console
+
+   The spacing, radius, duration and easing scales are shared with the customer
+   app (.kiro/specs/customer-chat-ui/ux-spec.md §4 and §6) so the two surfaces
+   feel like one product. Colours diverge deliberately: the console is a dense
+   data surface, not a messaging app.
+
+   Tokens ONLY. Component rules belong in app.css.
+   ========================================================================== */
+
+:root {
+  /* ---- Shared scale (aligned with the customer app) ------------------ */
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 12px;
+  --sp-6: 16px;
+  --sp-7: 24px;
+  --sp-8: 32px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ---- Scrollbars (shared treatment across both apps) ---------------- */
+  /* A thin floating bar with no track and no frame. */
+  --scrollbar-size: 6px;
+  --scrollbar-thumb: rgb(17 27 33 / 0.22);
+  --scrollbar-thumb-hover: rgb(17 27 33 / 0.38);
+
+  --dur-instant: 90ms;
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.45, 0.05, 0.55, 0.95);
+
+  /* ---- Layout -------------------------------------------------------- */
+  --nav-width: 208px;
+  --inbox-list-width: 292px;
+  --inbox-side-width: 380px;
+  --header-height: 56px;
+
+  /* Breakpoints, for reference. Media queries repeat the literals:
+       1200px  side panel collapses to tabs
+        900px  navigation moves above content
+        600px  single column */
+
+  /* ---- Surfaces ------------------------------------------------------ */
+  --c-bg: #f6f7f9;
+  --c-surface: #ffffff;
+  --c-surface-sunken: #f0f2f5;
+  --c-nav-bg: #12212b;
+  --c-nav-text: #c7d3da;
+  --c-nav-text-active: #ffffff;
+  --c-nav-active-bg: #1d3340;
+  --c-border: #dde3e8;
+  --c-border-strong: #c3ccd4;
+
+  /* ---- Text ---------------------------------------------------------- */
+  --c-text: #111b21;
+  --c-text-muted: #5b6b76;
+  --c-text-faint: #8a98a3;
+
+  /* ---- Brand / accent ------------------------------------------------ */
+  --c-accent: #008069;
+  --c-accent-weak: #e6f2ef;
+  --c-accent-text: #ffffff;
+
+  /* ---- Priority bands (paired with text, never colour alone) --------- */
+  --c-high: #c62828;
+  --c-high-bg: #fdecea;
+  --c-medium: #b26a00;
+  --c-medium-bg: #fff4e0;
+  --c-low: #5b6b76;
+  --c-low-bg: #eef1f3;
+
+  /* ---- Status -------------------------------------------------------- */
+  --c-ok: #1b7f4b;
+  --c-ok-bg: #e7f5ec;
+  --c-degraded: #b26a00;
+  --c-degraded-bg: #fff4e0;
+  --c-error: #c62828;
+  --c-error-bg: #fdecea;
+  --c-info: #0b5394;
+  --c-info-bg: #e7f3ff;
+
+  /* ---- Message origins ----------------------------------------------- */
+  --c-origin-customer-bg: #ffffff;
+  --c-origin-ai-bg: #e8f4f1;
+  --c-origin-human-bg: #e7f3ff;
+  --c-origin-system-bg: #f0f2f5;
+
+  /* ---- Typography ---------------------------------------------------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace;
+
+  /* Composite `font` shorthand: weight size/line-height family */
+  --t-h1: 600 20px/26px var(--font-sans);
+  --t-h2: 600 15px/20px var(--font-sans);
+  --t-h3: 600 13px/18px var(--font-sans);
+  --t-body: 400 14px/20px var(--font-sans);
+  --t-body-strong: 600 14px/20px var(--font-sans);
+  --t-small: 400 12.5px/17px var(--font-sans);
+  --t-label: 600 11px/15px var(--font-sans);
+  --t-metric: 600 18px/22px var(--font-sans);
+  --t-mono: 400 12px/17px var(--font-mono);
+  --t-mono-sm: 400 11px/16px var(--font-mono);
+
+  --label-tracking: 0.04em;
+
+  /* ---- Elevation ----------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgb(17 27 33 / 0.06);
+  --shadow-md: 0 2px 8px rgb(17 27 33 / 0.10);
+
+  /* ---- Device bezel (harness) ---------------------------------------- */
+  --device-bezel: 12px;
+  --device-radius: 28px;
+  --c-device-bezel: #1f2a30;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 1ms;
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+  }
+}

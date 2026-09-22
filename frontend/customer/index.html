@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Title is set from config/strings at boot so branding lives in one place. -->
+<title>Chat</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!--
+  Static shell only. Every mount point below is filled by a view module.
+  No inline styles and no inline event handlers: see
+  .kiro/steering/frontend-conventions.md rule 3.
+-->
+<div class="phone-frame">
+
+  <header class="chat-header" id="chatHeader"></header>
+
+  <!-- Offline and handoff banners stack here, offline above handoff. -->
+  <div class="banner-stack" id="bannerStack"></div>
+
+  <div class="message-area">
+    <div class="message-list" id="messageList">
+      <!-- Empty / loading / error states -->
+      <div class="message-list__states" id="messageStates"></div>
+      <!-- Message bubbles, separators, system messages, typing indicator -->
+      <div class="message-list__items" id="messageItems"></div>
+    </div>
+    <div class="jump-slot" id="jumpToLatest"></div>
+  </div>
+
+  <!-- Quick-reply chips. Filled in customer-chat-ui task 5. -->
+  <div class="quick-replies" id="quickReplies"></div>
+
+  <form class="composer" id="composer"></form>
+
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
