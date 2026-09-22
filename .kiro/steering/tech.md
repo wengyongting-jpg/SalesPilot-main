@@ -8,8 +8,10 @@ inclusion: always
 
 Frontend and backend are developed separately. When working on a frontend task:
 
-- **Do not modify anything under `salespilot/`, `tests/`, `data/`, `run.py`, or
-  `requirements.txt`.** Read them freely to understand the API contract.
+- **Do not modify anything under `salespilot/`, `tests/`, `run.py`, or
+  `requirements.txt`.** Read them freely to understand the API contract. The
+  knowledge base lives at `salespilot/data/knowledge_base.json`, so it is covered
+  by the `salespilot/` rule.
 - If a frontend requirement cannot be met with today's API, **do not patch the
   backend**. Record the required change in `docs/backend-contract.md` (what is
   needed, how to test it, how to accept it) and make the frontend degrade
@@ -36,6 +38,28 @@ Two distinct APIs exist. Do not conflate them:
 - **Backend REST API** — `/api/*` served by `salespilot/api/app.py`. This is the
   frontend's only integration surface. Documented in `docs/backend-contract.md`.
 
+## Frontend tests
+
+The frontends maintain their own suite under `frontend/tests/`, run with **Node's
+built-in test runner** — no dependency, no install, no build step:
+
+```powershell
+cd frontend
+node --test "tests/**/*.test.js"
+```
+
+`frontend/package.json` exists **only** to declare `"type": "module"` so Node can
+import the apps' ES modules. It has no dependencies and browsers never read it.
+Do not add dependencies to it, and do not introduce a separate test framework.
+
+Tests cover pure logic only: rules, stores, formatting, identity, mock adapters
+and the telemetry protocol. There is no DOM environment, because adding one would
+mean adding a dependency. Logic that needs testing is therefore extracted into
+pure modules — `customer/js/rules.js` is the precedent — rather than left private
+inside a view.
+
+Per `AGENTS.md` Rule 2, adding new tests still needs the owner's agreement.
+
 ## Frontend stack
 
 Vanilla **HTML + CSS + JavaScript (ES modules)**. No build step, no bundler, no
@@ -61,14 +85,16 @@ Constraints that follow from this choice:
 ```
 SalesPilot/
 ├── salespilot/              # Backend (READ-ONLY for frontend work)
+│   ├── data/                # Knowledge base (backend-owned data)
 │   └── static/              # Legacy console — FROZEN
 ├── frontend/
 │   ├── customer/            # Customer chat app
 │   └── admin/               # Trimmed staff console
 ├── docs/
+│   ├── backend-handoff.md   # Track ownership, priorities, frozen contracts
 │   ├── backend-contract.md  # API reference + changes required of the backend
+│   ├── backend-changelog.md # Gated: update only when the user asks
 │   └── frontend-changelog.md# Gated: update only when the user asks
-├── data/knowledge_base.json
 └── tests/                   # Backend tests
 ```
 

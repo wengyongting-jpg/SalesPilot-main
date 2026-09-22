@@ -2,242 +2,361 @@
 
 ## Overview
 
-A small three-view single-page app in `frontend/admin/`. Same architecture as the
-customer chat — `views → store → gateway` in one direction — so the two apps stay
-mentally interchangeable, but the transport is simpler: there is only one backend,
-so no adapter family is needed.
+Same architecture as the customer chat, so the two apps stay mentally
+interchangeable: `views → store → gateway`, one direction, no framework, no build
+step.
 
 ```
-views/  ──reads──▶  store  ──calls──▶  api.js  ──HTTP──▶  /api/*
-   └────dispatch intent──┘◀──────plain objects─────┘
+views/  ──reads──▶  store  ──calls──▶  gateway adapter  ──HTTP──▶  backend
+   └────dispatch intent──┘◀────────normalised──────────┘
 ```
 
-The console is **read-only except for one mutation**: case status transitions. That
-single write is what makes it more than a dashboard, and it must be real — the
-legacy console's takeover button is cosmetic and that mistake is not repeated here.
+The inversion from the customer app is deliberate and total: the customer adapter
+**discards** sales intelligence at the boundary, and the admin adapter **keeps all
+of it**. Both rules exist so the audience boundary lives in exactly one place per
+app and is structural rather than a matter of discipline.
 
-The console displays sales intelligence in full. This is the opposite of the
-customer chat, which discards it at the adapter boundary. Both rules exist for the
-same reason: put the audience boundary in one place and make it structural.
+Three routes: **Inbox** (landing), **Cases**, **Harness**.
 
-## Architecture
+## Transport
 
-```
-frontend/admin/
-├── index.html            # shell: nav + three view containers
-├── css/
-│   ├── tokens.css        # shared scale with the customer app + data-UI additions
-│   └── app.css           # nav, table, cards, badges
-└── js/
-    ├── main.js           # boot, routing, wiring
-    ├── config.js         # apiBase, intervals, feature flags
-    ├── strings.js        # all user-facing text, incl. state/signal/product labels
-    ├── store.js          # state + actions + subscribe()
-    ├── api.js            # the only module that calls fetch
-    └── views/
-        ├── nav.js        # three destinations + open-case badge
-        ├── queue.js      # priority counts + sorted table
-        ├── cases.js      # case cards + status transitions
-        └── detail.js     # one opportunity in full
-```
+Two adapters behind one interface, selected from config:
 
-No build step, no dependencies, ES modules, matching the customer app.
+| Adapter | Use |
+| --- | --- |
+| `mock` | Default. Scripted data, no network. The entire console runs on it. |
+| `salespilot` | Real backend. Deferred until `docs/api/interface-v1.md` v1 is frozen. |
 
-## Components and interfaces
+The backend is mid-refactor and the visibility-tier split (interface §5.1) will
+move admin reads to `/api/admin/*`. Binding to today's paths would be rework, so
+the first delivery is mock-only and `salespilot.js` is a stub that throws.
 
-### `api.js`
-
-Thin, typed-by-convention wrappers over the documented endpoints. Nothing else in
-the app calls `fetch`.
+Interface:
 
 ```js
-listOpportunities()            // GET  /api/opportunities   -> { count, items }
-getOpportunity(id)             // GET  /api/opportunities/{id}
-listCases()                    // GET  /api/cases           -> { count, items }
-updateCaseStatus(id, status)    // PATCH /api/cases/{id}      -> case
-seedDemoData()                 // POST /api/seed
-health()                       // GET  /health
+createGateway(config) -> {
+  listConversations()                  -> { items: ConversationSummary[] }
+  getConversation(id)                  -> { opportunity, messages, linkedCase }
+  listCases()                          -> { items: Case[] }
+  updateCaseStatus(id, status)         -> Case
+  listAgentRuns({ opportunityId, clientMessageId }) -> { items: AgentRun[] }
+  sendRepReply({ id, text, repName, clientMessageId }) -> { message }
+  seedDemoData()                       -> { seeded: boolean }
+  health()                             -> boolean
+  readonly name
+  readonly capabilities                -> { repReply, telemetry, author, quickReplies }
+}
 ```
 
-`GET /api/dashboard` is deliberately unused. It returns an `items` array identical
-to `/api/opportunities` plus a `text` field that is pre-rendered CLI output. Using
-the plain list endpoint avoids any temptation to display terminal text in a web UI.
-
-`GET /api/analytics` is unused in the first delivery; it is the basis of stretch
-item A1.
-
-### Store
-
-```js
-const state = {
-  view:        'queue' | 'cases' | 'detail',
-  selectedId:  string | null,
-  queue:       { status: 'idle'|'loading'|'error', items: [], counts: { HIGH:0, MEDIUM:0, LOW:0 } },
-  cases:       { status: 'idle'|'loading'|'error', items: [], openCount: 0 },
-  detail:      { status: 'idle'|'loading'|'error'|'notFound', opportunity: null, linkedCase: null },
-  transition:  { caseId: null, inFlight: false, error: null },
-};
-```
-
-Actions: `viewChanged`, `queueLoading`, `queueLoaded`, `queueFailed`,
-`casesLoading`, `casesLoaded`, `casesFailed`, `detailRequested`, `detailLoaded`,
-`detailFailed`, `transitionStarted`, `transitionSucceeded`, `transitionFailed`,
-`seedCompleted`.
-
-`counts` is populated by tallying the backend's `priority` strings, never by
-re-banding `final_score` (Requirement 5.2). The thresholds live in the backend's
-config; duplicating them here would be a second source of truth that silently
-drifts.
-
-### Ordering and normalisation helpers
-
-Two small pure helpers, the only place derived values are allowed:
-
-- **Queue ordering** — sort by `final_score` descending, with null scores last.
-  This is presentation ordering, not re-ranking: the score itself is untouched
-  (Requirement 1.2, 5.1).
-- **Case status normalisation** — uppercase and replace spaces and hyphens with
-  underscores, turning `"Taken Over"` into `TAKEN_OVER` (Requirement 2.3). The
-  backend serialises title case but accepts either form on write, so normalise on
-  read and send canonical tokens on write.
-
-### Views
-
-Each view owns a container element, subscribes to the store, and re-renders its
-own subtree. No shared DOM ownership.
-
-- **`nav.js`** — three destinations, active indication, open-case badge hidden at
-  zero.
-- **`queue.js`** — three priority count cards, then a table with columns:
-  customer, state, score, priority, signals, next action, takeover marker. Row
-  activation opens detail. Empty state offers seeding.
-- **`cases.js`** — one card per case with all fields from the case object, plus
-  controls driven by normalised status. Includes the standing note that closing a
-  case returns the conversation to the AI (Requirement 2.10).
-- **`detail.js`** — identity and flags, the five score dimensions, score history,
-  state history, transcript. When the opportunity is under takeover, the linked
-  case's reason and recommended action are surfaced at the top.
+`capabilities` is how the console degrades instead of breaking. `repReply: false`
+disables the composer with a stated reason; `telemetry: false` collapses the
+observability panel to client-observed timing. The mock advertises `repReply` and
+`telemetry` as **true** so the UI can be built and demonstrated; the future
+`salespilot` adapter will advertise what the backend actually supports.
 
 ## Data models
 
-The console consumes the backend's objects as documented in
-`docs/backend-contract.md` and does not define its own domain model. It stores what
-it receives and reads fields directly.
+Normalised at the adapter boundary, so views never touch raw payloads.
 
-Presentation-only mappings live in `strings.js`:
+```js
+// One inbox row
+ConversationSummary = {
+  id, name, score, priority, state, product,
+  humanTakeover, lastMessagePreview, lastMessageAt,
+  customerMessageCount,
+}
 
-- Product enum (`essential`, `family`, `plus`, `corporate`, `unknown`) → display
-  labels.
-- Signal values → short labels for dense table cells, for example
-  `Expansion: Family` → `Exp: Family`. The full value is kept as the cell's title
-  so nothing is lost.
-- Priority bands → badge classes.
+// Transcript entry — the authorship axis is resolved here, once
+Message = {
+  id, clientMessageId, role,          // 'customer' | 'agent'
+  origin,                             // 'customer' | 'ai' | 'human' | 'system'
+  text, ts, repName,
+}
 
-The five score dimensions are only available on `POST /api/messages` responses,
-not on the opportunity object, which exposes `final_score` and `priority`. The
-detail view therefore shows the total and the histories, and shows the dimension
-breakdown only when it is available. Recording this here prevents a future
-implementer from assuming the breakdown is always present.
+// interface-v1.md §5.3
+AgentRun = {
+  runId, clientMessageId, trigger, status,      // 'ok' | 'degraded' | 'error'
+  startedAt, durationMs, customerMessageCount,
+  steps:     [{ index, name, kind, durationMs, status }],
+  llmCalls:  [{ index, purpose, model, durationMs,
+                promptTokens, completionTokens, totalTokens,
+                cost: { amount, currency },
+                input: { chars, content }, output: { chars, content } }],
+  toolCalls: [],
+  totals: { agentStepCount, llmCallCount, toolCallCount, totalTokens,
+            cost: { amount, currency } },
+  clientObserved: { durationMs, status },       // harness only
+}
+```
+
+`origin` resolves `role` and `author` into one axis exactly once, at the adapter:
+
+```js
+const origin = role === 'customer' ? 'customer' : (author ?? 'ai');
+```
+
+Per `interface-v1.md` §1.2, `author` is absent for older data, and absent means
+`ai`. Views read `origin` and never re-derive it.
+
+**Counter naming.** The store uses `customerMessageCount`, never `turns`. The
+adapter renames the backend's `turns` on the way in, which confines the misleading
+name to one line of code.
+
+## Store
+
+```js
+state = {
+  route:        'inbox' | 'cases' | 'harness',
+  selectedId:   string | null,
+
+  inbox:   { status, items: [], counts: { HIGH, MEDIUM, LOW } },
+  conversation: { status, opportunity, messages: [], linkedCase },
+  runs:    { status, items: [], selectedRunId },
+  cases:   { status, items: [], openCount },
+  compose: { draft: '', inFlight: false, error: null },
+  transition: { caseId: null, inFlight: false, error: null },
+
+  harness: { deviceReady, transport, scenario, customerId, customerName,
+             timeline: [], selectedEntryId },
+
+  capabilities: { repReply, telemetry, author, quickReplies },
+}
+```
+
+Inbox ordering is presentation only: sort by `score` descending, nulls last. The
+score itself is never touched, and priority counts tally the backend's `priority`
+strings rather than re-banding numbers — the thresholds live in backend config and
+duplicating them here would be a second source of truth.
+
+## Components
+
+```
+frontend/admin/
+├── index.html
+├── css/{tokens.css, app.css}
+└── js/
+    ├── main.js            boot, hash routing, wiring
+    ├── config.js          apiBase, transport, operator, intervals, flags
+    ├── strings.js         all copy, plus product/signal/state label maps
+    ├── store.js
+    ├── identity.js        initials + deterministic colour from id
+    ├── format.js          time, duration, tokens, cost, currency
+    ├── gateway/{index.js, mock.js, salespilot.js}
+    └── views/
+        ├── nav.js             three destinations, open-case badge
+        ├── inboxList.js       left column, selection
+        ├── transcript.js      messages with origin labels
+        ├── repComposer.js     human reply, gated
+        ├── intelligence.js    state, score dims, histories, NBA, case
+        ├── observability.js   run timeline, steps, llm calls, totals
+        ├── cases.js           case cards, real transitions
+        └── harness.js         device iframe + debug panel
+```
+
+`transcript.js` and `observability.js` are shared between the Inbox route and the
+Harness route, which is why the harness needs no chat implementation of its own.
+
+## Identity
+
+`opportunity_id` is the key; `customer_name` is a label. The backend keys
+opportunities on id alone, so two customers may share a name, and a name is
+written once at creation and never updated. The console therefore:
+
+- shows the id on every inbox row and in the conversation header;
+- derives avatar initials from the name but the avatar colour from a hash of the
+  id, so two customers called Sarah look different;
+- never uses the name as a lookup key or a React-style render key.
 
 ## Event flows
 
-### Load queue
-
-```
-viewChanged('queue')
-  └─ store.queueLoading                → loading state
-  └─ api.listOpportunities()
-       ├─ ok    → store.queueLoaded(items)   → sort, tally counts, render table
-       │                                       or empty state with seed offer
-       └─ error → store.queueFailed          → error state, retry control
-```
-
-### Case transition — the only mutation
-
-```
-take-over activated
-  └─ store.transitionStarted(caseId)   → that card's controls disabled
-  └─ api.updateCaseStatus(caseId, 'TAKEN_OVER')
-       ├─ ok    → store.transitionSucceeded(updatedCase)
-       │            ├─ replace the case in state from the response body
-       │            └─ recompute openCount and the nav badge
-       └─ error → store.transitionFailed(message)
-                    └─ card unchanged, inline non-blocking error
-```
-
-The display is never updated optimistically (Requirement 2.7). A takeover that
-appears to succeed but did not is worse than a slow one, because two people could
-believe they own the same customer. The response body is the source of truth for
-the new status rather than the value that was requested.
-
-### Open detail
+### Open a conversation
 
 ```
 row activated
-  └─ store.detailRequested(id)          → view switches, loading state
-  └─ api.getOpportunity(id)
-       ├─ 200 → store.detailLoaded(opportunity)
-       │          └─ if human_takeover, find the non-closed case for this id
-       │             from the already-loaded case list and attach it
-       ├─ 404 → store.detailFailed('notFound')  → not-found state
-       └─ err → store.detailFailed(message)     → error state
+  └─ store.conversationRequested(id)      → workspace loading
+  └─ gateway.getConversation(id)
+       ├─ ok  → store.conversationLoaded({ opportunity, messages, linkedCase })
+       │         └─ if capabilities.telemetry → gateway.listAgentRuns({ opportunityId: id })
+       │                                     → store.runsLoaded(items)
+       └─ err → store.conversationFailed(message)
 ```
 
-Linking a case to an opportunity is done client-side by matching
-`case.opportunity_id` against the opportunity id and taking the one whose
-normalised status is not `CLOSED`. The backend maintains one active case per
-opportunity, so this match is unambiguous.
+### Case transition — the only mutation outside replying
+
+```
+take-over activated
+  └─ store.transitionStarted(caseId)     → that card's controls disabled
+  └─ gateway.updateCaseStatus(caseId, 'TAKEN_OVER')
+       ├─ ok  → store.transitionSucceeded(updatedCase)   ← from the response body
+       │         ├─ recompute openCount and the nav badge
+       │         └─ if it is the open conversation, enable the composer
+       └─ err → store.transitionFailed(message)          → card unchanged, inline error
+```
+
+Never optimistic. A takeover that appears to succeed but did not is worse than a
+slow one, because two people could believe they own the same customer. The new
+status comes from the response body, not from the value requested.
+
+### Human reply
+
+```
+composer submit
+  └─ guard: capabilities.repReply && opportunity.humanTakeover   → else disabled
+  └─ store.replyStarted(clientMessageId)
+  └─ gateway.sendRepReply({ id, text, repName: config.operator.name, clientMessageId })
+       ├─ ok  → store.replyAppended(message)   → origin 'human'
+       └─ err → store.replyFailed(message)     → draft preserved, inline error
+```
+
+The draft survives failure. Losing a representative's typed reply is worse than
+showing an error.
+
+## Harness
+
+### Why an iframe
+
+The route embeds `../customer/index.html` in an iframe rather than importing the
+customer modules. Three reasons:
+
+1. It is literally the shipped customer app, unmodified — a device, not a replica.
+2. The customer app's CSS sets global `html` and `body` rules; importing it would
+   leak those into the console and require scoping every selector.
+3. The compliance invariant holds structurally. Sales intelligence renders in the
+   left panel; the iframe contains an app that has no shape for it. Isolation, not
+   discipline.
+
+The iframe is sized to device dimensions (400×844), which puts the customer app
+below its 600px breakpoint so it renders its full-viewport mobile layout. The
+console draws the bezel.
+
+### Protocol
+
+`postMessage`, same-origin, explicit target origin, origin validated on receipt.
+Both apps must therefore be served from one HTTP origin — which ES modules already
+require, so this adds no deployment constraint.
+
+```js
+// device -> console
+{ source: 'salespilot-customer', type: 'ready',     payload: { transport, customerId } }
+{ source: 'salespilot-customer', type: 'exchange',  payload: { clientMessageId, durationMs, status } }
+{ source: 'salespilot-customer', type: 'state',     payload: { customerMessageCount, humanTakeover, connection, messageCount } }
+
+// console -> device
+{ source: 'salespilot-admin', type: 'reset' }
+{ source: 'salespilot-admin', type: 'receive', payload: { text, author, repName } }
+{ source: 'salespilot-admin', type: 'inject',  payload: { text } }
+```
+
+`receive` delivers an inbound message to the device — used to show what a **human
+representative's** reply looks like from the customer's side. When `author` is
+`human` the device also flips into takeover, because that is what the backend's
+semantics imply. This is the one thing no other surface can show: the Inbox
+composer writes through the backend rep-reply path, which does not exist yet, and
+in mock mode the device shares no backend with the console anyway.
+
+`inject` drives the device as if the customer had typed. **No control exposes it**,
+because typing in the device is the identical action; it is retained for scripted
+scenario replay (stretch A3).
+
+**Configuration is not a message.** The console reconfigures the device by
+rebuilding the iframe `src` with new query parameters — `transport`,
+`customerId`, `customerName`, `scenario` — which the customer app reads through
+the allow-list in its `config.js`.
+
+The alternative, a `configure` message applied to a live app, was rejected:
+changing transport means rebuilding the gateway, and mutating a running one risks
+carrying stale connection, capability and conversation state across the switch. A
+reload rebuilds from nothing, which is the cheaper thing to reason about.
+Requirement 6.6 is still met, because the *console* never reloads — only the
+device inside it does.
+
+Handshake: the console arms a timeout when it sets the iframe `src`, and treats
+the device as connected only on `ready`. `reset` and `inject` are disabled until
+then, so no command is lost to a race. A device reload repeats the whole
+sequence.
+
+### Telemetry routing — the important part
+
+The device payload is deliberately tiny and non-sensitive: a correlation id, a
+client-observed duration, a status. **Telemetry does not travel through the
+customer app**, because under `interface-v1.md` §2 the customer surface has no
+shape for it — the app never receives it in the first place.
+
+```
+1. device   ──▶ customer surface        POST with client_message_id
+2. device   ──postMessage──▶ console    { clientMessageId, durationMs, status }
+3. console  ──▶ admin surface           listAgentRuns({ clientMessageId })
+4. console renders the debug timeline
+```
+
+`client_message_id`, added to the backend for idempotency, doubles as the
+telemetry correlation key. No new identifier is needed.
+
+### Required change to the customer app
+
+Small, and inert when not embedded:
+
+- `js/telemetry.js` — no-ops unless `window.parent !== window`; emits `ready`,
+  `exchange`, `state`.
+- `js/config.js` — accept overrides from URL parameters for transport, customer id,
+  customer name and API base, through an explicit allow-list so a crafted link
+  cannot reach anything else. Useful independently of the harness, and the
+  mechanism configuration travels on.
+- a message listener for `reset` and `inject`, which reuses the existing
+  programmatic send path rather than synthesising input events.
+
+Requirement 6.10 is the hard constraint: standalone, the customer app must emit
+nothing at all.
 
 ## Error handling
 
-| Condition | Store effect | Representative sees |
+| Condition | Store effect | Operator sees |
 | --- | --- | --- |
-| Queue load fails | `queueFailed` | Error state with retry; no stale rows shown as current |
-| Cases load fails | `casesFailed` | Error state with retry |
-| Detail 404 | `detailFailed('notFound')` | Not-found state |
-| Detail load fails | `detailFailed` | Error state with retry |
-| Transition fails | `transitionFailed` | Inline error on that card; nothing else disturbed |
-| Seed fails | `queueFailed` | Error state; the endpoint is idempotent so retrying is safe |
+| Inbox load fails | `inboxFailed` | Error with retry; no stale rows shown as current |
+| Conversation load fails | `conversationFailed` | Error with retry; list still usable |
+| Runs load fails | `runsFailed` | Observability panel error; transcript unaffected |
+| Case transition fails | `transitionFailed` | Inline error on that card only |
+| Reply fails | `replyFailed` | Inline error, draft preserved |
+| Device never sends `ready` | `deviceReady: false` | Timeout notice with a reload control |
+| Capability unavailable | — | Control disabled with the reason stated |
 
-Stale data is never presented as current (Requirement 5.3). When a refresh fails,
-the view shows an error rather than leaving old rows looking authoritative.
-
-Error text comes from `strings.js`. Unlike the customer app, showing a status code
-here is acceptable — the audience is internal — but stack traces still go only to
-the console.
+Stale data is never presented as current. Showing a status code is acceptable here
+because the audience is internal; stack traces still go only to the console.
 
 ## Security notes
 
-- No authentication. Anyone reaching the console can read every customer's
-  transcript and take over or close any case. Accepted demo limitation, recorded in
-  `product.md` and `docs/backend-contract.md`. Do not add a fake login to paper
-  over it.
+- No authentication. Anyone reaching the console can read every transcript and
+  take over or close any case. Documented demo limitation; not to be disguised.
 - All backend text — names, case summaries, escalation reasons, transcripts,
-  knowledge facts — renders through `textContent`. Case summaries in particular are
-  backend-composed strings containing customer-derived content, so they are treated
-  as untrusted data.
-- Transcripts contain personal customer messages. The console is an internal tool
-  and should not be exposed publicly, even for a demo, beyond the presenter's own
-  machine or network.
-- No outbound requests to any origin other than the configured `apiBase`.
+  knowledge facts, and **model prompts** — renders through `textContent`. Prompts
+  echo customer wording and are untrusted data.
+- Prompt and output content is displayed only when the backend chooses to expose
+  it. When withheld, the console shows character counts and says content is not
+  exposed; it never attempts to reconstruct it.
+- `postMessage` never uses `*` as a target origin, and every received message is
+  origin-checked and shape-checked before use.
+- Transcripts and cost data are internal. The console should not be exposed beyond
+  the operator's own machine or network.
+- No outbound request to any origin other than the configured `apiBase`.
 
 ## Testing strategy
 
-Manual and scripted, no test framework, consistent with the customer app.
+Manual and scripted, no test framework, consistent with the customer app. A JS
+test runner would mean a build step.
 
-1. **Seeded-data walkthrough.** Run `py -3 run.py --serve --seed`, then exercise
-   all three views. The three scripted conversations produce at least one HIGH
-   priority opportunity and at least one open case, which covers the interesting
-   paths.
-2. **Transition round-trip.** Take over a case, confirm via
-   `curl http://127.0.0.1:8000/api/cases` that the server status actually changed,
-   then resolve it and confirm `human_takeover` cleared on the opportunity via
-   `GET /api/opportunities/{id}`. This is the check the legacy console would fail.
-3. **Failure injection.** Stop the backend mid-session and confirm each view shows
-   an error state rather than stale or blank content.
-4. **Empty-state check.** Run without `--seed` and confirm the queue offers
-   seeding, seeding works, and the view refreshes.
-5. **Accessibility baseline.** Keyboard-only pass over navigation, rows and case
-   controls; confirm table header semantics and that no status is colour-only.
+1. **Mock walkthrough.** All three routes against the mock adapter, including a
+   case transition, a human reply, and a degraded agent run.
+2. **Degradation check.** Force `capabilities.repReply` and
+   `capabilities.telemetry` to false and confirm the console stays usable with
+   stated reasons rather than blank panels or zeros.
+3. **Harness handshake.** Reload the device mid-session and confirm configuration
+   is reapplied; send a message and confirm a timeline entry appears and resolves
+   to a run.
+4. **Isolation check.** Confirm no sales intelligence renders inside the iframe,
+   and that opening the customer app standalone emits no `postMessage` at all.
+5. **Identity check.** Two conversations with the same `customer_name` and
+   different ids must be distinguishable by id and avatar colour.
+6. **Accessibility baseline.** Keyboard-only pass, table semantics, no
+   colour-only status.
 
 Backend tests are out of scope and untouched.

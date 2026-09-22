@@ -2,6 +2,14 @@
 
 > SalesPilot turns customer conversations into structured sales opportunities.
 
+> **Where the code is, as of 2026-09-22.** This README describes `salespilot/`, which
+> works and is what to run today — but it is **frozen** and will be deleted once its
+> replacement lands. The replacement is `backend/`, an agentic rebuild that is **not
+> usable yet**: no HTTP surface, no model access, no storage. See
+> [`backend/README.md`](backend/README.md) for its status and
+> [`docs/backend-plan.md`](docs/backend-plan.md) for why it is being rebuilt rather
+> than refactored. Add nothing to `salespilot/`.
+
 SalesPilot is an AI sales assistant for **CareSure Health Insurance** (fictional
 insurer). It does not simply answer customer questions — it continuously
 analyses every message in a WhatsApp-style conversation, detects sales signals,
@@ -170,10 +178,10 @@ py -3 -m pytest tests/ -v
 SalesPilot/
 ├── run.py                          # Entry point
 ├── requirements.txt                # fastapi, uvicorn, httpx, pytest
-├── data/knowledge_base.json        # Structured KB for four CareSure products
 ├── logs/                           # Auto-created at runtime
 ├── runtime/                        # Auto-created: SQLite database location
 ├── salespilot/
+│   ├── data/knowledge_base.json    # Structured KB for four CareSure products
 │   ├── models.py                   # Enums, Opportunity, NextBestAction, ScoreCard
 │   ├── config.py                   # Paths, thresholds, provider env settings
 │   ├── logging_utils.py            # Logging setup

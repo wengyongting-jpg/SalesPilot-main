@@ -13,5 +13,17 @@ uvicorn>=0.30
 # Test client for the API tests
 httpx>=0.27
 
-# Optional: real LLM reply generation (`--llm`, SALESPILOT_LLM=openai)
+# ---- backend/ (the rebuild) ---------------------------------------------
+# Agent runtime: the tool-calling loop and structured outputs whose schemas are
+# generated from backend/domain/enums.py. Confined to backend/agent/ — see
+# docs/backend-plan.md §4 and backend/tests/test_architecture.py, which fails the
+# build if it leaks into any other package.
+#
+# The `[openai]` extra pulls the OpenAI client, used for ANY OpenAI-compatible
+# endpoint including the organiser gateway. backend/domain/ and backend/kernel/
+# stay standard-library only and run with none of this installed.
+pydantic-ai-slim[openai]==2.46.0
+
+# Optional: real LLM reply generation in the frozen salespilot build
+# (`--llm`, SALESPILOT_LLM=openai)
 # openai>=1.40
