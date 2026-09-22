@@ -117,6 +117,21 @@ describe('replyReceived', () => {
     assert.equal(store.getState().messages.length, 1);
   });
 
+  test('deduplicates a server echo against its optimistic client id', () => {
+    const store = createStore();
+    store.sendRequested({ text: 'hello', clientId: 'client-1' });
+    store.replyReceived([
+      createMessage({
+        id: 'server-1',
+        clientId: 'client-1',
+        direction: 'out',
+        author: 'customer',
+        text: 'hello',
+      }),
+    ]);
+    assert.equal(store.getState().messages.length, 1);
+  });
+
   test('clears the typing indicator', () => {
     const store = createStore();
     store.sendRequested({ text: 'x' });
@@ -313,6 +328,30 @@ describe('receiving a human representative message', () => {
     const system = store.getState().messages.filter((m) => m.author === 'system');
     assert.equal(system.length, 1);
     assert.equal(store.getState().messages.length, 3);
+  });
+
+  test('a late representative name updates the header without another announcement', () => {
+    const store = createStore();
+    store.takeoverChanged(true);
+    store.takeoverChanged(true, 'Alex');
+
+    assert.equal(store.getState().assistant.repName, 'Alex');
+    assert.equal(
+      store.getState().messages.filter((message) => message.author === 'system').length,
+      1
+    );
+  });
+
+  test('restoring takeover from history does not invent a new transcript event', () => {
+    const store = createStore();
+    store.historyLoaded([
+      createMessage({ id: 'h-1', direction: 'in', author: 'human', text: 'Hi' }),
+    ]);
+    store.takeoverRestored(true, 'Alex');
+
+    assert.equal(store.getState().assistant.humanTakeover, true);
+    assert.equal(store.getState().assistant.repName, 'Alex');
+    assert.equal(store.getState().messages.length, 1);
   });
 
   test('a human message is incoming and carries no delivery status', () => {

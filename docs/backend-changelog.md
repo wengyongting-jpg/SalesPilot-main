@@ -1,7 +1,8 @@
 # Backend changelog
 
-Record of what changed in each update to the Python backend: `salespilot/**`,
-`tests/**`, `run.py`, `requirements.txt`.
+Record of what changed in each update to the Python backend: `backend/**`,
+`backend/tests/**`, and the frozen `salespilot/**`, `tests/**`, `run.py`,
+`requirements.txt`.
 
 > **This file is updated only on explicit instruction from the repository owner.**
 >
@@ -44,6 +45,191 @@ changed, why, and anything a reviewer or demo operator needs to know.
 ---
 
 ## Entries
+
+## 2026-09-22 — `backend/` rebuild, phases P3–P7: agent, observability, storage, API, model access
+
+**Scope:** api, engine, detection, knowledge, storage, models, providers, tooling — all
+under `backend/`
+**Contract items:** 1–15. Every one now **on the wire**, where the previous entry had
+10, 11 and 13 modelled only.
+
+Third entry of the day and the one that makes the rebuild usable. `backend/` now serves
+both surfaces, persists to SQLite, calls a real model when one is configured, and runs
+a complete conversation when none is. `salespilot/` remains frozen and untouched.
+
+### Changed
+
+- **`agent/` — a real agent loop, not a fixed pipeline.** Two model-led segments with
+  the deterministic kernel between them, and five read-only tools the model may choose
+  to call: `lookup_product_fact`, `compare_products`, `list_products`,
+  `conversation_summary`, `request_human_handoff`. The composing segment continues the
+  observing segment's conversation rather than starting a second one, so the model
+  writing the reply remembers what it just looked up.
+- **The kernel is not a tool.** It runs unconditionally, exactly once, in a fixed
+  order, as plain calls in `services/conversation.py`. That is what makes "exactly
+  once, in this order" a property of the code rather than of a framework's
+  configuration — it holds identically when no model is configured, and it still holds
+  when a provider times out halfway through a run.
+- **Extraction and reply are peers, not a path and a fallback.** Each has a
+  rule-based/template implementation and a model implementation behind one protocol.
+  Delegation between them is always *declared*: the outcome says it degraded and why.
+  The frozen build's untyped `except Exception:` fallback is what let its two paths
+  drift apart unnoticed.
+- **Framework adopted: Pydantic AI** (`pydantic-ai-slim[openai]`). Chosen for
+  enum-typed structured output, which removes the drift defect class by construction,
+  and because `TestModel` exercises the whole loop offline. Confined to `agent/` by an
+  executable rule.
+- **`observability/` — per-run records.** Ordered steps with kind, duration, status and
+  `detail`; model calls with tokens and cost; the tool calls the model chose;
+  violations. Rendered to the terminal per run and served on the admin tier.
+- **`storage/` — two repositories behind one protocol**, in-memory and SQLite, with
+  messages, score history and state history in their own tables so a cursor read and a
+  bounded history read do not have to load a whole conversation.
+- **`api/` — 13 routes split by visibility tier.** The boundary is a *type*: the
+  customer response model has no field in which sales intelligence could be placed, so
+  leaking a score is impossible rather than discouraged.
+- **Model access.** `providers/` resolves configuration to a `ProviderSpec` and imports
+  nothing third-party; `agent/model_factory.py` is the only module that constructs a
+  model. Either outcome is first-class — with no key the whole pipeline completes on
+  the offline peers and says why, in plain language, at startup and in every run.
+- **`--configure`** — interactive setup. Takes the key without echoing it, finds which
+  endpoint accepts it, reads that endpoint's real model list so the name is chosen
+  rather than guessed, verifies with one live request, then updates `.env` in place,
+  preserving comments and unmanaged settings.
+- **`--demo`** — the whole pipeline in a terminal, no server. Prints each turn's
+  intent, signals, state transition, both score axes decomposed, qualification,
+  priority, next best action, every tool the model chose, and the run's tokens and
+  cost. The two web surfaces show the customer's side and the sales queue; neither
+  shows what happened in between.
+- **`--probe`** distinguishes *cannot reach the endpoint* from *the endpoint said no*,
+  because the first is the network or the URL and the second is the credential or the
+  account. It speaks HTTP directly over the standard library, so it tests the endpoint
+  rather than the framework and still works when the framework is absent.
+- **CORS** for configured loopback origins (item 15), from configuration, no wildcard,
+  `allow_credentials` off. This was the last thing preventing either frontend from
+  working in a browser rather than only from Node.
+
+### Fixed
+
+- **Cost accounting reported two paid model calls as a known zero.** `record_llm_call`
+  existed from P4 and was thoroughly tested, but nothing on the live path ever called
+  it, so a run through a real provider reported `llm_call_count: 0`,
+  `total_tokens: 0` and `cost: {"amount": 0.0, "pricing_known": true}`. The last field
+  is the damaging one: it does not say *unmeasured*, it asserts the price is known and
+  the spend was precisely nothing. Live for the whole of P4 to P6.
+
+  *Why nothing caught it.* The recorder was exercised without its caller, and the only
+  service-level assertion about `llm_call_count` ran on the offline path — where zero
+  is the correct answer. The fixture could not fail. `TestModel` reports token usage,
+  so the defect was catchable with no network, no key and no fake server.
+- **Taking a case over did not set `human_takeover`** (item 14). `CaseService.transition`
+  released the opportunity on `CLOSED` but never claimed it on `TAKEN_OVER`, so the
+  console could `PATCH` a case to `Taken Over`, receive 200, and then have its rep
+  reply refused with "take over first" — said to the operator who had just done that.
+  A test named `test_taking_over_does_not_clear_the_flag` asserted the flag was true
+  and passed, because escalation had already set it; the defect only appears on the
+  *second* takeover, after a close has released it.
+- **Product inheritance read the assistant's own words.** The overview reply names all
+  four plans, so scanning recent history for a product picked one out of the
+  assistant's message. A budget-conscious individual was reclassified as corporate,
+  quadrupling the deal size.
+- **The handover reply arrived with a price card attached.** Customer-visible facts are
+  now one list, used both to prompt the composer and as the returned `facts`, so the
+  reply and the cards cannot disagree.
+- **Priority ignored Dormant/Lost.** A lapsed conversation could outrank a live one.
+  Now capped at `MEDIUM` — it may be worth reviving, just not the next call.
+- **`FIT_A_MIN` raised 70 → 75.** One question naming a mid-tier plan scored exactly 70
+  and reached `HIGH`, which devalues the band.
+- **Behaviour decay made multiplicative.** As an additive recency dimension it could
+  not move a band: forty days of silence still came out `HIGH`.
+- **Extraction prompt drift, structurally.** The frozen build offered the model
+  `"medical_question"`, which the domain rejects, and only 7 of 11 signals — making
+  four escalation triggers unreachable whenever a model was configured. Schemas are now
+  generated from the enums, so the two cannot disagree.
+- **Redirected output could crash on the customer's own words.** Piped stdout takes the
+  locale encoding, `cp936` on the development machine, and traces echo customer text;
+  a character that encoding cannot represent raised `UnicodeEncodeError` from inside
+  the logger. Now UTF-8 with `errors="replace"`.
+- Several defects in this work's *own* new code, found by running it rather than by
+  reading it: `--demo` read `run["total_tokens"]` and `step["notes"]`, neither of which
+  exists, and defaulted — printing "0 tokens" for a run that had spent them, and
+  reducing every degradation to the bare word "degraded". A `.get(key, 0)` on a key
+  that was never there is not a default, it is a fabrication.
+
+### Contract impact
+
+- **`docs/backend-contract.md` items 1–15 are all shipped.** Items 14 and 15 closed
+  last, both P0. The register also had two items numbered 13; CORS is now 15.
+- **`docs/api/interface-v1.md` is now `Status: frozen`.** v1 is closed to both tracks,
+  corrections included: anything found wrong in it is recorded in
+  `docs/backend-contract.md` and specified in a v2, never patched in place.
+- **It was verified line by line against a running server *before* the freeze**, which
+  is the order that mattered — after freezing, a correction costs a v2. Seven errors,
+  all corrected first, full list in that file's §7. The two worst would have made a
+  frontend behave incorrectly rather than merely be uninformed: the header instructed
+  frontends to treat every `PROPOSED` field as absent, which by then meant discarding
+  the entire live contract; and §4.3's `HIGH (score ≥ 80)` threshold disagrees with the
+  served `priority` on two of four seeded conversations, demoting the genuine
+  high-intent customers to `MEDIUM`. §5.9 now specifies the two-axis derivation and
+  marks `total` display-only.
+- **Paths moved.** Staff endpoints are namespaced under `/api/admin/*` and the customer
+  transcript is `/api/conversations/{id}`. Adapters written against the frozen build's
+  paths need retargeting; §5 of the interface is the target.
+- **Wire values.** `role` is `customer` | `business`. Messages carry `author` and
+  `generation`. `cost` carries `pricing_known`. Runs carry `violations`, steps carry
+  `detail`.
+- **`?since=` takes a message id or an ISO-8601 timestamp, never an index.** An index
+  returns 400.
+
+### Verified
+
+```powershell
+py -3 -m pytest backend/tests -q     # 421 passed, 91 subtests
+py -3 -m pytest tests -q             # 80 passed — frozen build, untouched
+py -3 -m backend --probe
+py -3 -m backend --demo
+py -3 -m backend --serve --seed
+```
+
+- 13 routes exercised under real uvicorn, and again through `TestClient`.
+- The model path proved end to end against a **local OpenAI-compatible server** built
+  for the purpose: two HTTP requests per message matching the two segments,
+  `generation: "llm"`, real token counts, and cost of `$0.0000069` for
+  2 × (11 + 3) tokens at `gpt-4o-mini` rates — checked against the published rates by
+  hand.
+- Both degradation columns walked: no key → `generation: "template"` throughout, runs
+  `degraded` with the reason on the step that degraded, `/health` `degraded: true`;
+  with a model → `"llm"`, `status: "ok"`.
+- The two most consequential fixes were confirmed by **deliberately reintroducing the
+  defect** and watching the new assertions fail: four for cost accounting, one for the
+  takeover round trip.
+- Customer-tier payload re-checked for leakage against the full forbidden list from
+  interface-v1 §2: nothing.
+
+### Known issues
+
+- **The organiser's gateway was never available**, so the OpenAI-compatible path is
+  verified against a local endpoint and against the published protocol, not against
+  theirs. If their endpoint speaks something else, `providers/resolve.py` plus
+  `agent/model_factory.py` are the only files that change.
+- **No authentication anywhere.** Unchanged accepted demo limitation, not an oversight.
+  CORS is scoped to loopback for the same reason a wildcard was refused: nothing is
+  protected today, and a wildcard would become a real hole the moment that changes.
+- **Offline mode logs a WARNING for every message**, because the run genuinely is
+  degraded. In the default mode that is every message, which buries real warnings.
+  Splitting "degraded because no model is configured" (informational) from "degraded
+  because a configured model failed" (a warning) is proposed and not yet done.
+- **Memory and cost model has room to improve** — `docs/backend-plan.md` §12. Three
+  quadratic paths are guarded rather than eliminated.
+- **Several acceptance checks are still walked by hand** rather than asserted,
+  `docs/backend-plan.md` §11.
+- **`main_concern` prompt-injection hardening is partial.** `policy.sanitise_concern`
+  and `policy.data_section` are in use; the rest of §12.1 is not implemented.
+- **The frontends have not been run against `backend/` in a browser.** The backend no
+  longer prevents it — that was items 14 and 15 — but the step itself belongs to the
+  frontend track.
+
+---
 
 ## 2026-09-22 — `backend/` rebuild, phases P0–P2: skeleton, domain, deterministic kernel
 

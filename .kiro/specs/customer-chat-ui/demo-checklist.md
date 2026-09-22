@@ -24,7 +24,7 @@ mode from the presentation:
 - [ ] For live mode, the backend is running and seeded:
 
 ```powershell
-py -3 run.py --serve --seed
+py -3 -m backend --serve --seed
 ```
 
 - [ ] For live mode, confirm the API is healthy before starting:
@@ -36,7 +36,7 @@ curl http://127.0.0.1:8000/health
 - [ ] Reset the conversation you intend to use, so the opening state is clean:
 
 ```powershell
-curl -X DELETE http://127.0.0.1:8000/api/opportunities/C-2001
+curl -X DELETE http://127.0.0.1:8000/api/conversations/C-2001
 ```
 
 ---
@@ -44,7 +44,7 @@ curl -X DELETE http://127.0.0.1:8000/api/opportunities/C-2001
 ## 2. Seeded backend scenarios
 
 `POST /api/seed` (or `--seed`) creates three conversations. These are the
-backend's canonical scripts, verified against `salespilot/demo.py`. Use them when
+backend's canonical scripts, verified against `backend/demo.py`. Use them when
 you want the admin console to have populated data behind the chat, and reuse
 Sarah's script when you want a predictable five-turn arc.
 
@@ -213,8 +213,7 @@ Sign-off gate for tasks 1–5. Every box is observable; none is a matter of tast
 ### Hygiene
 
 - [ ] No console errors or unhandled rejections during a full scenario run.
-- [ ] `git status` shows no modification under `salespilot/`, `tests/`, `data/`,
-      `run.py` or `requirements.txt`.
+- [ ] `git status` shows only intended source, test and documentation changes.
 - [ ] No network request to any origin other than the configured `apiBase`.
 - [ ] Any newly discovered backend gap is recorded in `docs/backend-contract.md`.
 - [ ] `docs/frontend-changelog.md` is unchanged unless an entry was explicitly
@@ -228,10 +227,8 @@ Sign-off gate for tasks 1–5. Every box is observable; none is a matter of tast
   conversation. Accepted for the demo; recorded in `docs/backend-contract.md`.
 - Delivery ticks reflect client-observed request milestones, not server-issued
   read receipts. The backend has no receipt mechanism.
-- Quick replies depend on a backend field that does not exist yet.
-- A human representative cannot actually reply yet; there is no endpoint for it,
-  so takeover currently changes presentation and stops AI autonomy rather than
-  starting a live human conversation.
-- Retrying a failed send is safe only once backend idempotency ships. Until then
-  the control warns in its accessible description.
+- Quick replies are backend-provided and capped at three.
+- Human replies persist through the admin endpoint and reach the customer through
+  polling that runs only while takeover is active.
+- Retrying a keyed send is idempotent on the live backend.
 - All premium figures are fictional indicative demo rates.

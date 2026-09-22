@@ -38,6 +38,80 @@ changed, why, and anything a reviewer or demo operator needs to know.
 
 ## Entries
 
+## 2026-09-22 — Live integration completion and customer handoff hardening
+
+**Scope:** both
+**Spec tasks:** `customer-chat-ui` 4–6 · `admin-console-ui` live adapter and Inbox
+
+This entry supersedes the unresolved integration notes in the older entries below;
+those entries remain unchanged as historical snapshots of what was true when they
+were written.
+
+### Changed
+
+- Both applications now use the real SalesPilot backend by default. The customer
+  adapter uses the customer-safe message and transcript endpoints; the admin adapter
+  uses the queue, opportunity, case, representative-reply and agent-run endpoints.
+- Added the customer quick-reply view. Up to three backend-provided suggestions render
+  as accessible buttons, use the ordinary send path and disappear on typing or human
+  takeover.
+- Added periodic backend health checks and recovery. Browser offline state is reflected
+  immediately; reconnecting rechecks health without automatically resending a failed
+  message.
+- Added takeover-only incremental polling. It starts only when `human_takeover` and
+  the incremental-fetch capability are both true, uses the last server message as its
+  cursor and stops when takeover ends.
+- Human representative identity now crosses the customer-safe contract as `rep_name`.
+  The customer header updates from the generic Representative label to the supplied
+  name when the first human message arrives.
+- The admin dashboard response is now queue-sized: at most the latest message per row,
+  with score and state histories deferred to the conversation-detail request.
+- Updated runtime, architecture, handoff and acceptance documentation to describe the
+  maintained `backend/` + `frontend/` system rather than the frozen implementation.
+
+### Fixed
+
+- Fixed a send/takeover race that could render the customer's latest outgoing message
+  twice. Store reconciliation now compares both the server `id` and the echoed
+  `client_message_id`.
+- Restoring an already-active takeover from history no longer fabricates a new system
+  event at the end of an old transcript.
+- A representative name arriving after takeover updates the header without adding a
+  second takeover announcement.
+- Deleting or resetting a conversation from another surface now ends local takeover
+  and stops polling instead of logging a repeating 404 every two seconds.
+- Removed direct component colour literals that had drifted outside the token files.
+- Corrected the package test script for Node's Windows glob handling.
+
+### Verified
+
+- Frontend suite: **283 tests, 65 suites, 0 failures** using Node's built-in runner.
+- Backend suite: **439 tests, 0 failures**, including customer `rep_name` projection
+  and the lightweight dashboard response.
+- Browser walkthrough against the live local backend verified quick-reply rendering and
+  sending, human takeover, persisted admin representative reply, two-second customer
+  delivery, representative-name display and absence of duplicate customer messages.
+- The backend was run with `SALESPILOT_LLM=offline`; the walkthrough made no real model
+  call and every generated business reply remained explicitly marked as a template.
+
+### Known issues
+
+- Authentication, authorisation and multi-tenancy remain outside the demo scope.
+- The WhatsApp adapter is still an explicit shape-only stub; no WhatsApp Cloud API
+  delivery occurs.
+- Delivery ticks are client-observed milestones, not server-issued read receipts.
+- The customer mock intentionally advertises reduced capabilities so degraded UI paths
+  remain demonstrable; the live adapter advertises the complete backend capability set.
+- DOM and layout behaviour still rely on browser walkthroughs because the frontend has
+  no DOM testing dependency or build step.
+
+### Backend dependencies
+
+Idempotency, quick replies, server-side visibility tiers, `author`/`generation`/
+`rep_name`, incremental transcript reads, representative replies, CORS and agent-run
+telemetry are all shipped. The frontend no longer applies the degradation table from
+the older entries when using the default `salespilot` transport.
+
 ## 2026-09-22 — Test suite, UI refinements, harness rep-message control
 
 **Scope:** both

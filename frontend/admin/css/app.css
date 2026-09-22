@@ -603,23 +603,43 @@ body {
   border-radius: var(--radius-pill);
 }
 
-/* ---- History lists -------------------------------------------------- */
+/* ---- Data tables ---------------------------------------------------- */
+/* Real <table> markup for columnar data, so each cell is associated with its
+   column header for assistive technology. Styled to read as tinted rows rather
+   than a ruled grid, matching the container-over-lines treatment elsewhere. */
 
-.history {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
+.data-table {
+  width: 100%;
+  font: var(--t-small);
+  border-collapse: separate;
+  border-spacing: 0 var(--sp-2);
 }
 
-.history__item {
-  display: grid;
-  grid-template-columns: 44px auto 1fr;
-  gap: var(--sp-4);
-  align-items: baseline;
+.data-table th {
+  padding: 0 var(--sp-4) var(--sp-2);
+  font: var(--t-label);
+  letter-spacing: var(--label-tracking);
+  color: var(--c-text-muted);
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.data-table td {
   padding: var(--sp-3) var(--sp-4);
-  font: var(--t-small);
+  vertical-align: baseline;
   background: var(--c-surface-sunken);
-  border-radius: var(--radius-sm);
+}
+
+.data-table td:first-child {
+  border-top-left-radius: var(--radius-sm);
+  border-bottom-left-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.data-table td:last-child {
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
 }
 
 .history__time {
@@ -793,16 +813,27 @@ body {
   color: var(--c-text-muted);
 }
 
-.step {
+/* Per-step explanation from the backend, given room to be read. */
+.step-detail {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  grid-template-columns: 132px minmax(0, 1fr);
   gap: var(--sp-4);
   align-items: baseline;
   padding: var(--sp-3) var(--sp-4);
-  margin-bottom: var(--sp-1);
+  margin-bottom: var(--sp-2);
   font: var(--t-small);
   background: var(--c-surface-sunken);
   border-radius: var(--radius-sm);
+}
+
+.step-detail__text {
+  color: var(--c-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.notice--warn {
+  color: var(--c-degraded);
+  background: var(--c-degraded-bg);
 }
 
 .step__index {
@@ -1013,7 +1044,7 @@ body {
 .device__screen {
   display: block;
   overflow: hidden;
-  background: #000;
+  background: var(--c-device-screen);
   border: 0;
   border-radius: calc(var(--device-radius) - var(--device-bezel));
 }
@@ -1139,19 +1170,43 @@ body {
    12. Responsive
    ========================================================================== */
 
-/* Side panel collapses to tabs within a narrower column. */
+/* Below 1200px the side panel stops being a third column and collapses into a
+   tabbed region beneath the conversation. It keeps its own tab strip, so the
+   Assessment / Agent Activity split survives — and, critically, nothing is
+   hidden. An earlier version hid the panel entirely below 900px and the
+   conversation list below 600px, which silently removed data rather than
+   reflowing it. */
 @media (max-width: 1199px) {
   :root {
-    --inbox-side-width: 320px;
     --inbox-list-width: 248px;
   }
 
+  .inbox {
+    grid-template-columns: var(--inbox-list-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .inbox__list {
+    grid-row: 1 / span 2;
+  }
+
+  .inbox__center {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .inbox__side {
+    grid-row: 2;
+    grid-column: 2;
+    max-height: 44vh;
+  }
+
   .totals {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* Navigation moves above the content. */
+/* Navigation moves above the content, and the three regions stack. */
 @media (max-width: 899px) {
   .console {
     grid-template-columns: minmax(0, 1fr);
@@ -1178,11 +1233,27 @@ body {
   }
 
   .inbox {
-    grid-template-columns: var(--inbox-list-width) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow-y: auto;
+  }
+
+  .inbox__list {
+    grid-row: 1;
+    grid-column: 1;
+    max-height: 32vh;
+  }
+
+  .inbox__center {
+    grid-row: 2;
+    grid-column: 1;
+    min-height: 320px;
   }
 
   .inbox__side {
-    display: none;
+    grid-row: 3;
+    grid-column: 1;
+    max-height: none;
   }
 
   .harness {
@@ -1190,14 +1261,24 @@ body {
     grid-auto-rows: min-content;
     overflow-y: auto;
   }
+
+  .harness__debug {
+    border-right: 0;
+  }
 }
 
 @media (max-width: 599px) {
-  .inbox {
+  .totals {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .inbox__list {
-    display: none;
+  .case-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Column headers would wrap badly at this width; the data tables scroll
+     horizontally instead of being truncated. */
+  .panel-section {
+    overflow-x: auto;
   }
 }

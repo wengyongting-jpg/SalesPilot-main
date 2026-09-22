@@ -7,8 +7,8 @@
  * total is shown alone with an explanation, rather than a fabricated breakdown
  * (requirement 3.2).
  */
-import { strings, SCORE_DIMENSION_MAX } from '../strings.js';
-import { el, clear, badge, section, kvRow, stateBlock } from '../dom.js';
+import { strings } from '../strings.js';
+import { el, clear, badge, section, kvRow, stateBlock, dataTable } from '../dom.js';
 import { time, priorityClass } from '../format.js';
 
 const SCORE_MAX = 100;
@@ -23,20 +23,40 @@ export function createIntelligence({ el: root }) {
       pairs.flatMap(([key, value, muted]) => kvRow(key, value, muted))
     );
 
-  const dimensions = (dims) =>
-    Object.entries(dims).map(([key, value]) => {
-      const max = SCORE_DIMENSION_MAX[key] ?? 0;
-      const pct = max ? Math.min(100, (value / max) * 100) : 0;
-      return el('div', { className: 'dim' }, [
-        el('div', { className: 'dim__head' }, [
-          el('span', { text: strings.scoreDimension[key] ?? key }),
-          el('span', { text: `${value} / ${max}` }),
-        ]),
-        el('div', { className: 'dim__track' }, [
-          el('div', { className: 'dim__fill', style: { width: `${pct}%` } }),
-        ]),
-      ]);
-    });
+  /**
+   * One axis of the two-axis score.
+   *
+   * The bar is scaled against the axis total rather than a per-component maximum:
+   * the backend publishes the components and the total, not a cap per component,
+   * and inventing a denominator here would be the frontend deriving a number the
+   * backend never stated.
+   */
+  const axis = (title, components, labels, total, totalLabel, extra = []) => {
+    const children = [
+      el('div', { className: 'dim__head' }, [
+        el('strong', { text: title }),
+        el('span', { text: `${totalLabel} ${total}` }),
+      ]),
+    ];
+
+    for (const [key, value] of Object.entries(components)) {
+      const pct = total > 0 ? Math.min(100, (value / total) * 100) : 0;
+      children.push(
+        el('div', { className: 'dim' }, [
+          el('div', { className: 'dim__head' }, [
+            el('span', { text: labels[key] ?? key }),
+            el('span', { text: String(value) }),
+          ]),
+          el('div', { className: 'dim__track' }, [
+            el('div', { className: 'dim__fill', style: { width: `${pct}%` } }),
+          ]),
+        ])
+      );
+    }
+
+    children.push(...extra);
+    return el('div', { className: 'panel-section' }, children);
+  };
 
   const signals = (list) =>
     list.length === 0
@@ -54,33 +74,28 @@ export function createIntelligence({ el: root }) {
         );
 
   const scoreHistory = (list) =>
-    el(
-      'div',
-      { className: 'history' },
-      list.map((entry) =>
-        el('div', { className: 'history__item' }, [
-          el('span', { className: 'history__time', text: time(entry.ts) }),
-          el('strong', { text: String(entry.score) }),
-          el('span', { className: 'history__reason', text: `${entry.state} · ${entry.trigger}` }),
-        ])
-      )
-    );
+    dataTable({
+      caption: strings.intelligence.scoreHistoryCaption,
+      headers: strings.intelligence.scoreHistoryColumns,
+      rows: list.map((entry) => [
+        el('span', { className: 'history__time', text: time(entry.ts) }),
+        el('strong', { text: String(entry.score) }),
+        entry.state,
+        el('span', { className: 'history__reason', text: entry.trigger }),
+      ]),
+    });
 
   const stateHistory = (list) =>
-    el(
-      'div',
-      { className: 'history' },
-      list.map((entry) =>
-        el('div', { className: 'history__item' }, [
-          el('span', { className: 'history__time', text: time(entry.ts) }),
-          el('strong', { text: entry.to }),
-          el('span', {
-            className: 'history__reason',
-            text: `from ${entry.from} — ${entry.reason}`,
-          }),
-        ])
-      )
-    );
+    dataTable({
+      caption: strings.intelligence.stateHistoryCaption,
+      headers: strings.intelligence.stateHistoryColumns,
+      rows: list.map((entry) => [
+        el('span', { className: 'history__time', text: time(entry.ts) }),
+        entry.from,
+        el('strong', { text: entry.to }),
+        el('span', { className: 'history__reason', text: entry.reason }),
+      ]),
+    });
 
   return {
     render(state) {
@@ -92,7 +107,18 @@ export function createIntelligence({ el: root }) {
 
       const opportunity = state.conversation.opportunity;
       const linkedCase = state.conversation.linkedCase;
-      const signature = `${opportunity?.id ?? '-'}|${opportunity?.score}|${opportunity?.humanTakeover}|${linkedCase?.statusToken ?? '-'}`;
+      // The score is an object, so interpolating it produced the constant string
+      // "[object Object]". That kept this hidden panel cached after a conversation
+      // changed: the transcript and run timeline updated while Assessment showed
+      // stale values. Include backend revision data and scalar fallbacks instead.
+      const signature = [
+        opportunity?.id ?? '-',
+        opportunity?.updatedAt?.getTime?.() ?? '-',
+        opportunity?.finalScore ?? '-',
+        opportunity?.customerMessageCount ?? '-',
+        opportunity?.humanTakeover ?? '-',
+        linkedCase?.statusToken ?? '-',
+      ].join('|');
       if (signature === lastSignature) return;
       lastSignature = signature;
 
@@ -103,21 +129,73 @@ export function createIntelligence({ el: root }) {
         return;
       }
 
-      // ---- Score ------------------------------------------------------
+      // ---- Score: two axes, plus a display-only headline ---------------
+      const score = opportunity.score;
       const scoreChildren = [
         el('div', { className: 'score-total' }, [
           el('span', {
             className: 'score-total__value',
-            text: opportunity.score ?? strings.intelligence.noScore,
+            text: opportunity.finalScore ?? strings.intelligence.noScore,
           }),
-          opportunity.score !== null && opportunity.score !== undefined
+          opportunity.finalScore !== null && opportunity.finalScore !== undefined
             ? el('span', { className: 'score-total__max', text: `/ ${SCORE_MAX}` })
             : null,
           badge(opportunity.priority ?? '—', priorityClass(opportunity.priority)),
         ]),
+        el('div', {
+          className: 'kv__val kv__val--muted',
+          text: strings.score.headlineNote,
+        }),
       ];
-      if (opportunity.scoreDimensions) {
-        scoreChildren.push(...dimensions(opportunity.scoreDimensions));
+
+      if (score) {
+        scoreChildren.push(
+          axis(
+            strings.score.fitTitle,
+            {
+              need_identified: score.fit.needIdentified,
+              product_potential: score.fit.productPotential,
+              expansion: score.fit.expansion,
+            },
+            strings.score.fit,
+            score.fit.total,
+            strings.score.fitTotal
+          ),
+          axis(
+            strings.score.behaviourTitle,
+            {
+              purchase_intent: score.behaviour.purchaseIntent,
+              purchase_readiness: score.behaviour.purchaseReadiness,
+              engagement: score.behaviour.engagement,
+            },
+            strings.score.behaviour,
+            score.behaviour.raw,
+            strings.score.behaviourRaw,
+            [
+              // The decay is the part a reviewer most needs to see: a high raw
+              // behaviour score that has decayed after silence is a different
+              // situation from a low one, and the totals alone hide that.
+              el('div', { className: 'kv' }, [
+                ...kvRow(
+                  strings.score.behaviourTotal,
+                  String(score.behaviour.total)
+                ),
+                ...kvRow(
+                  strings.score.engagementRecency,
+                  strings.score.recencyNote(score.behaviour.engagementRecency)
+                ),
+                ...kvRow(
+                  strings.score.engagementDepth,
+                  String(score.behaviour.engagementDepth)
+                ),
+                ...kvRow(
+                  strings.score.engagementUrgency,
+                  String(score.behaviour.engagementUrgency)
+                ),
+              ]),
+            ]
+          )
+        );
       } else {
         scoreChildren.push(
           el('div', {
@@ -127,6 +205,35 @@ export function createIntelligence({ el: root }) {
         );
       }
       root.append(section(strings.intelligence.scoreTitle, scoreChildren));
+
+      // ---- Qualification ----------------------------------------------
+      // A held opportunity is excluded from the queue, so the reason it is held
+      // has to be visible rather than implied by its absence.
+      root.append(
+        section(strings.qualification.label, [
+          el('div', { className: 'case__head' }, [
+            badge(
+              strings.qualification[opportunity.qualification] ??
+                opportunity.qualification,
+              opportunity.qualification === 'qualified' ? 'badge--ok' : 'badge--medium'
+            ),
+          ]),
+          opportunity.qualificationReason
+            ? el('div', { className: 'kv' }, [
+                ...kvRow(
+                  strings.qualification.reasonLabel,
+                  opportunity.qualificationReason
+                ),
+              ])
+            : null,
+          opportunity.qualification === 'held'
+            ? el('div', {
+                className: 'kv__val kv__val--muted',
+                text: strings.qualification.heldNote,
+              })
+            : null,
+        ])
+      );
 
       // ---- Profile ----------------------------------------------------
       root.append(

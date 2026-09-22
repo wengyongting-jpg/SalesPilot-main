@@ -19,6 +19,60 @@ async function loadGateway(search, tag) {
   return gateway;
 }
 
+describe('named scenarios — requirement 13.4', () => {
+  test('nurture serves a multi-step arc that never hands over', async () => {
+    const gateway = await loadGateway('?scenario=nurture', 'sc-nurture');
+    const seen = [];
+    for (let i = 0; i < 4; i += 1) {
+      const result = await gateway.send({ text: `turn ${i}` });
+      seen.push(result.messages[0].text);
+      assert.equal(result.humanTakeover, false);
+      assert.equal(result.messages[0].author, 'ai');
+    }
+    assert.equal(new Set(seen).size, 4, 'each turn must advance the script');
+  });
+
+  test('hesitation covers price objection and a competitor mention', async () => {
+    const gateway = await loadGateway('?scenario=hesitation', 'sc-hesitation');
+    const replies = [];
+    for (let i = 0; i < 4; i += 1) {
+      replies.push((await gateway.send({ text: `turn ${i}` })).messages[0].text);
+    }
+    const all = replies.join('\n');
+    assert.match(all, /fictional indicative rates/, 'premium reply keeps the disclaimer');
+    assert.match(all, /rather than compare other insurers/, 'competitor handling present');
+  });
+
+  test('takeover flips to a human representative partway through', async () => {
+    const gateway = await loadGateway('?scenario=takeover', 'sc-takeover');
+
+    const first = await gateway.send({ text: 'corporate cover please' });
+    assert.equal(first.humanTakeover, false, 'AI still owns the first turn');
+    assert.equal(first.messages[0].author, 'ai');
+
+    const second = await gateway.send({ text: 'we want a quotation' });
+    assert.equal(second.humanTakeover, true, 'handover happens here');
+    assert.equal(second.messages[0].author, 'human');
+    assert.equal(second.repName, 'Alex');
+
+    const third = await gateway.send({ text: 'thanks' });
+    assert.equal(third.humanTakeover, true, 'takeover persists');
+    assert.equal(third.messages[0].author, 'human');
+  });
+
+  test('reset returns a scenario to its first reply', async () => {
+    const gateway = await loadGateway('?scenario=takeover', 'sc-reset');
+    await gateway.send({ text: 'one' });
+    await gateway.send({ text: 'two' });
+    assert.equal((await gateway.send({ text: 'three' })).humanTakeover, true);
+
+    await gateway.reset();
+    const afterReset = await gateway.send({ text: 'again' });
+    assert.equal(afterReset.humanTakeover, false, 'takeover point resets too');
+    assert.equal(afterReset.messages[0].author, 'ai');
+  });
+});
+
 describe('scenario selection', () => {
   test('defaults to a fresh, empty conversation', async () => {
     const gateway = await loadGateway('', 'fresh');
@@ -26,10 +80,20 @@ describe('scenario selection', () => {
     assert.equal(messages.length, 0);
   });
 
-  test('an unknown scenario falls back to fresh', async () => {
+  test('fresh is an alias for the nurture script', async () => {
+    const fresh = await loadGateway('?scenario=fresh', 'alias-a');
+    const nurture = await loadGateway('?scenario=nurture', 'alias-b');
+    const a = await fresh.send({ text: 'hi' });
+    const b = await nurture.send({ text: 'hi' });
+    assert.equal(a.messages[0].text, b.messages[0].text);
+  });
+
+  test('an unknown scenario falls back to an empty conversation and the nurture script', async () => {
     const gateway = await loadGateway('?scenario=nonsense', 'unknown');
     const { messages } = await gateway.loadHistory();
     assert.equal(messages.length, 0);
+    const result = await gateway.send({ text: 'hi' });
+    assert.equal(result.humanTakeover, false, 'must not inherit a takeover point');
   });
 
   test('the rendering fixture loads a transcript', async () => {

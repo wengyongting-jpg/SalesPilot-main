@@ -57,21 +57,32 @@ export function count(value) {
 /**
  * Cost from the backend's own amount and currency.
  *
- * Returns the "not reported" string when the backend did not report a cost —
- * deliberately not "0", because zero spend and unknown spend are different facts
- * (requirement 4.10).
+ * Three outcomes, because there are three different facts (requirement 4.10,
+ * interface-v1.md §5.3 requirement 7):
+ *
+ * - no cost object at all  -> "not reported", never "0"
+ * - `pricingKnown: false`  -> "price unknown". The backend sends `amount: 0.0`
+ *   for a model absent from its price table, and that zero means "no idea", not
+ *   "free". Rendering it as a number invites someone to budget against it.
+ * - otherwise               -> the backend's own amount and currency
  */
 export function cost(value) {
   if (!value || value.amount === null || value.amount === undefined) {
     return strings.observability.notReported;
   }
+  if (value.pricingKnown === false) return strings.observability.priceUnknown;
   const amount = Number(value.amount);
   const currency = value.currency || '';
   const digits = amount > 0 && amount < 0.01 ? 6 : 4;
   return `${amount.toFixed(digits)} ${currency}`.trim();
 }
 
-/** Sum a list of backend cost objects without inventing a currency. */
+/**
+ * Sum a list of backend cost objects without inventing a currency.
+ *
+ * One unpriced part makes the whole total unpriced, mirroring the backend's own
+ * `MIN(pricing_known)`: a sum is only as trustworthy as its worst component.
+ */
 export function sumCost(costs) {
   const present = costs.filter(
     (c) => c && c.amount !== null && c.amount !== undefined
@@ -82,6 +93,7 @@ export function sumCost(costs) {
     amount: present.reduce((total, c) => total + Number(c.amount), 0),
     // Mixed currencies would be a backend bug; surface it rather than hide it.
     currency: currencies.size === 1 ? [...currencies][0] : '?',
+    pricingKnown: present.every((c) => c.pricingKnown !== false),
   };
 }
 

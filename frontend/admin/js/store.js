@@ -102,11 +102,23 @@ export function createStore() {
     return counts;
   };
 
-  /** Presentation ordering only — the score itself is untouched. */
-  const byScoreDesc = (a, b) => {
-    const left = a.score ?? -1;
-    const right = b.score ?? -1;
-    return right - left;
+  /**
+   * Presentation ordering only — no value is recomputed.
+   *
+   * Ranking is by **priority**, not by the score. The kernel derives priority from
+   * a two-axis fit/behaviour matrix rather than a threshold on a single number,
+   * and the backend marks `score.total` as display-only. Sorting by the number
+   * would therefore contradict the ranking the backend actually made — a
+   * HIGH-priority opportunity could sit below a MEDIUM one with a bigger total.
+   * The score breaks ties within a band so the order stays stable.
+   */
+  const PRIORITY_RANK = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+
+  const byPriorityThenScore = (a, b) => {
+    const rankA = PRIORITY_RANK[String(a.priority ?? '').toUpperCase()] ?? 3;
+    const rankB = PRIORITY_RANK[String(b.priority ?? '').toUpperCase()] ?? 3;
+    if (rankA !== rankB) return rankA - rankB;
+    return (b.score ?? -1) - (a.score ?? -1);
   };
 
   return {
@@ -145,7 +157,7 @@ export function createStore() {
 
     inboxLoaded(items) {
       state.inbox.status = 'idle';
-      state.inbox.items = [...items].sort(byScoreDesc);
+      state.inbox.items = [...items].sort(byPriorityThenScore);
       state.inbox.counts = tallyPriorities(items);
       notify();
     },
@@ -274,11 +286,12 @@ export function createStore() {
         (c) => c.statusToken === 'OPEN'
       ).length;
 
-      // Keep the open conversation in step: taking over enables its composer,
-      // resolving disables it again (requirement 5.10).
+      // Keep the open conversation's linked case in step (requirement 5.10).
+      // The takeover flag is deliberately NOT inferred from the case status:
+      // they are two backend facts, and the backend is the only authority on
+      // the second one. main.js re-reads the opportunity after a transition.
       const opportunity = state.conversation.opportunity;
       if (opportunity && opportunity.id === updated.opportunityId) {
-        opportunity.humanTakeover = updated.statusToken !== 'CLOSED';
         state.conversation.linkedCase =
           updated.statusToken === 'CLOSED' ? null : updated;
       }

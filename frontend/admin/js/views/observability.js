@@ -17,7 +17,7 @@
  * character count is shown and the withholding is stated (requirement 4.5).
  */
 import { strings } from '../strings.js';
-import { el, clear, badge, section, stateBlock, skeleton } from '../dom.js';
+import { el, clear, badge, section, stateBlock, skeleton, dataTable } from '../dom.js';
 import {
   time,
   duration,
@@ -112,16 +112,47 @@ export function createObservability({ el: root, onSelectRun, standalone = false 
       ]
     );
 
-  const stepRow = (step) =>
-    el('div', { className: 'step' }, [
-      el('span', { className: 'step__index', text: String(step.index) }),
-      el('span', { text: step.name }),
-      el('span', {
-        className: 'step__kind',
-        text: strings.stepKind[step.kind] ?? step.kind,
-      }),
-      el('span', { className: 'step__duration', text: duration(step.durationMs) }),
-    ]);
+  const stepsTable = (steps) =>
+    dataTable({
+      caption: strings.observability.stepsCaption,
+      headers: strings.observability.stepsColumns,
+      rows: steps.map((step) => [
+        el('span', { className: 'step__index', text: String(step.index) }),
+        // A degraded step is named in text, not signalled by colour alone.
+        step.status === 'ok'
+          ? step.name
+          : el('span', {}, [
+              el('span', { text: `${step.name} ` }),
+              badge(step.status, runStatusClass(step.status)),
+            ]),
+        el('span', {
+          className: 'step__kind',
+          text: strings.stepKind[step.kind] ?? step.kind,
+        }),
+        el('span', { className: 'step__duration', text: duration(step.durationMs) }),
+      ]),
+    });
+
+  /**
+   * The backend explains each step in `detail` — why it degraded, which transition
+   * fired, how many facts were retrieved. That reasoning is the most useful thing
+   * in the panel, so it gets its own block rather than being squeezed into a
+   * table cell or dropped.
+   */
+  const stepDetails = (steps) => {
+    const explained = steps.filter((step) => step.detail);
+    if (explained.length === 0) return null;
+    return el(
+      'div',
+      { className: 'panel-section' },
+      explained.map((step) =>
+        el('div', { className: 'step-detail' }, [
+          el('span', { className: 'step__kind', text: step.name }),
+          el('span', { className: 'step-detail__text', text: step.detail }),
+        ])
+      )
+    );
+  };
 
   const payload = (label, data) => {
     const children = [
@@ -175,7 +206,18 @@ export function createObservability({ el: root, onSelectRun, standalone = false 
   const runDetail = (run) =>
     el('div', {}, [
       section(strings.observability.stepsTitle, [
-        el('div', {}, run.steps.map(stepRow)),
+        stepsTable(run.steps),
+        stepDetails(run.steps),
+        // A model contract violation means the model proposed a value the domain
+        // refused. The previous build downgraded these silently, which is exactly
+        // how three escalation triggers went missing, so they are surfaced loudly.
+        run.violations?.length
+          ? el('div', { className: 'notice notice--warn', attrs: { role: 'note' } }, [
+              el('span', {
+                text: strings.observability.violations(run.violations.length),
+              }),
+            ])
+          : null,
         el('div', { className: 'totals' }, [
           metric(strings.observability.steps, count(run.totals.agentStepCount)),
           metric(strings.observability.toolCalls, count(run.totals.toolCallCount)),

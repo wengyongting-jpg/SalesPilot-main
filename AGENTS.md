@@ -157,7 +157,7 @@ new files.
 | `.kiro/steering/tech.md` | Stack, repository layout, and the backend read-only rule for frontend work. |
 | `.kiro/steering/frontend-conventions.md` | Frontend coding rules and design-token discipline. Applies to `frontend/**`. |
 | `docs/backend-handoff.md` | Track ownership, priorities, and the contracts that must not change. Start here if you own the backend. |
-| `docs/api/interface-v1.md` | Authoritative request/response contract. Shared; editable while draft. |
+| `docs/api/interface-v1.md` | Authoritative request/response contract. Shared, and **frozen as of 2026-09-22** — no edits by either track, corrections included; a change means `interface-v2.md`. |
 | `docs/backend-plan.md` | Backend rebuild plan. Backend-owned; frontend read-only. |
 | `docs/backend-contract.md` | Current REST API reference plus the specification of every requested backend change. |
 | `docs/backend-changelog.md` | Gated changelog for the Python backend. Authorisation required. |

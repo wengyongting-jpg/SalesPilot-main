@@ -18,10 +18,13 @@ async function loadConfig(search, tag) {
 }
 
 describe('defaults', () => {
-  test('mock transport, so the app runs with no server', async () => {
+  test('salespilot transport, so the normal app uses the real backend', async () => {
     const config = await loadConfig('', 'default');
-    assert.equal(config.transport, 'mock');
-    assert.equal(config.apiBase, '');
+    assert.equal(config.transport, 'salespilot');
+    // The API base is a loopback address rather than empty: same-origin can never
+    // be right, because the backend serves no static files. The default transport
+    // uses it directly.
+    assert.match(config.apiBase, /^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
   test('polling interval and scroll threshold are configured, not hard-coded', async () => {
@@ -57,7 +60,7 @@ describe('allowed overrides', () => {
 describe('rejected overrides', () => {
   test('an unknown transport falls back to the default', async () => {
     const config = await loadConfig('?transport=evil', 'bad-transport');
-    assert.equal(config.transport, 'mock');
+    assert.equal(config.transport, 'salespilot');
   });
 
   test('feature flags are not reachable from the URL', async () => {
@@ -85,7 +88,7 @@ describe('rejected overrides', () => {
 
   test('prototype pollution attempts are ignored', async () => {
     const config = await loadConfig('?__proto__=x&constructor=y', 'proto');
-    assert.equal(config.transport, 'mock');
+    assert.equal(config.transport, 'salespilot');
     assert.equal({}.x, undefined);
   });
 });
@@ -93,7 +96,7 @@ describe('rejected overrides', () => {
 describe('robustness', () => {
   test('a malformed query string does not throw', async () => {
     const config = await loadConfig('?%%%&&&=', 'malformed');
-    assert.equal(config.transport, 'mock');
+    assert.equal(config.transport, 'salespilot');
   });
 
   test('the whatsapp transport is accepted by the allow-list', async () => {

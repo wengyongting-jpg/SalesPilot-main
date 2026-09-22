@@ -64,25 +64,33 @@
   /* ---- Text ---------------------------------------------------------- */
   --c-text: #111b21;
   --c-text-muted: #5b6b76;
-  --c-text-faint: #8a98a3;
+  /* Was #8a98a3 at 2.96:1 — well below AA. This is used for 11-12px timestamps
+     and ids, so it needs the full 4.5:1, not the large-text allowance. Darkened
+     far enough to also clear AA on the sunken surface, where it appears inside
+     data-table cells and system-message labels. */
+  --c-text-faint: #626e79;
 
   /* ---- Brand / accent ------------------------------------------------ */
   --c-accent: #008069;
-  --c-accent-weak: #e6f2ef;
+  /* Accent text on accent-weak measured 4.27:1; the tint is lightened rather
+     than the accent darkened, so the brand colour stays exact. */
+  --c-accent-weak: #f1f8f5;
   --c-accent-text: #ffffff;
 
   /* ---- Priority bands (paired with text, never colour alone) --------- */
   --c-high: #c62828;
   --c-high-bg: #fdecea;
-  --c-medium: #b26a00;
+  /* Was #b26a00 at 3.89:1 on its tint. */
+  --c-medium: #8f5600;
   --c-medium-bg: #fff4e0;
   --c-low: #5b6b76;
   --c-low-bg: #eef1f3;
 
   /* ---- Status -------------------------------------------------------- */
-  --c-ok: #1b7f4b;
+  /* Was #1b7f4b at 4.46:1 — marginally short of AA. */
+  --c-ok: #17703f;
   --c-ok-bg: #e7f5ec;
-  --c-degraded: #b26a00;
+  --c-degraded: #8f5600;
   --c-degraded-bg: #fff4e0;
   --c-error: #c62828;
   --c-error-bg: #fdecea;
@@ -90,8 +98,10 @@
   --c-info-bg: #e7f3ff;
 
   /* ---- Message origins ----------------------------------------------- */
+  /* The AI tint is lightened so the accent-coloured origin label clears AA on
+     it; it was 4.34:1 against #e8f4f1. */
   --c-origin-customer-bg: #ffffff;
-  --c-origin-ai-bg: #e8f4f1;
+  --c-origin-ai-bg: #f1f8f6;
   --c-origin-human-bg: #e7f3ff;
   --c-origin-system-bg: #f0f2f5;
 
@@ -123,6 +133,7 @@
   --device-bezel: 12px;
   --device-radius: 28px;
   --c-device-bezel: #1f2a30;
+  --c-device-screen: #000000;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -44,25 +44,53 @@ describe('createGateway', () => {
   });
 });
 
-describe('salespilot stub', () => {
-  test('every read and write method throws', () => {
-    const gateway = createSalesPilotGateway();
-    assert.throws(() => gateway.listConversations());
-    assert.throws(() => gateway.getConversation('C-1'));
-    assert.throws(() => gateway.listCases());
-    assert.throws(() => gateway.updateCaseStatus('H-1', 'CLOSED'));
-    assert.throws(() => gateway.listAgentRuns({}));
-    assert.throws(() => gateway.sendRepReply({}));
-    assert.throws(() => gateway.seedDemoData());
+describe('salespilot adapter', () => {
+  // No network here: these assert the adapter's contract surface. Request and
+  // response mapping is verified against a live backend separately, because a
+  // mocked fetch would only prove the mock agrees with itself.
+  const gateway = () => createSalesPilotGateway({ apiBase: 'http://127.0.0.1:8000' });
+
+  test('exposes the whole gateway interface', () => {
+    const g = gateway();
+    for (const method of [
+      'listConversations',
+      'getConversation',
+      'listCases',
+      'updateCaseStatus',
+      'listAgentRuns',
+      'getConversationCost',
+      'sendRepReply',
+      'seedDemoData',
+      'analytics',
+      'health',
+    ]) {
+      assert.equal(typeof g[method], 'function', `missing ${method}`);
+    }
   });
 
-  test('health reports false rather than throwing', async () => {
-    const gateway = createSalesPilotGateway();
-    assert.equal(await gateway.health(), false);
+  test('advertises every capability, now that the backend provides them', () => {
+    assert.deepEqual(gateway().capabilities, {
+      repReply: true,
+      telemetry: true,
+      author: true,
+      quickReplies: true,
+    });
   });
 
-  test('capabilities are all false, so dependent controls degrade rather than error', () => {
-    const gateway = createSalesPilotGateway();
-    assert.deepEqual(Object.values(gateway.capabilities), [false, false, false, false]);
+  test('a correlation key with no opportunity id returns nothing rather than querying', async () => {
+    // The endpoint requires opportunity_id. Querying without it would be a 422;
+    // the adapter short-circuits so the harness sees "no runs" instead of an error.
+    const result = await gateway().listAgentRuns({ clientMessageId: 'orphan-key' });
+    assert.deepEqual(result.items, []);
+  });
+
+  test('health resolves false rather than throwing when nothing is listening', async () => {
+    const offline = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:59999' });
+    assert.equal(await offline.health(), false);
+  });
+
+  test('tolerates a trailing slash on apiBase', () => {
+    const g = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:8000/' });
+    assert.equal(g.name, 'salespilot');
   });
 });

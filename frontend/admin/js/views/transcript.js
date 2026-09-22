@@ -23,6 +23,13 @@ import { time, dateTime, priorityClass } from '../format.js';
 export function createTranscript({ headerEl, transcriptEl, onRetry, onViewCase }) {
   let lastSignature = null;
 
+  // Appended messages — including a representative's own reply — are announced
+  // politely, matching the customer app's message list.
+  transcriptEl.setAttribute('role', 'log');
+  transcriptEl.setAttribute('aria-live', 'polite');
+  transcriptEl.setAttribute('aria-relevant', 'additions');
+  transcriptEl.setAttribute('aria-label', strings.conversation.transcriptLabel);
+
   const renderHeader = (opportunity) => {
     clear(headerEl);
     if (!opportunity) return;
@@ -66,9 +73,24 @@ export function createTranscript({ headerEl, transcriptEl, onRetry, onViewCase }
         ? `${strings.origin.human} · ${message.repName}`
         : strings.origin[message.origin] ?? message.origin;
 
+    // `generation` says whether a model produced the wording. A template reply
+    // involved none, and an operator must not be left to assume otherwise — the
+    // same reason the customer-facing assistant is always labelled as AI.
+    const generationBadge =
+      message.generation && message.generation !== 'human'
+        ? badge(
+            strings.generation[message.generation] ?? message.generation,
+            message.generation === 'llm' ? 'badge--info' : 'badge--neutral',
+            message.generation === 'template'
+              ? strings.generation.templateNote
+              : undefined
+          )
+        : null;
+
     return el('div', { className: `entry entry--${message.origin}` }, [
       el('div', { className: 'entry__head' }, [
         el('span', { className: 'entry__origin', text: originLabel }),
+        generationBadge,
         el('span', {
           className: 'entry__time',
           text: time(message.ts),

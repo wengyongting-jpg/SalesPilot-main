@@ -179,7 +179,7 @@ body {
 }
 
 .header-btn:hover {
-  background: rgb(255 255 255 / 0.15);
+  background: var(--c-header-hover);
 }
 
 /* =============================================================================
@@ -410,7 +410,7 @@ body {
 }
 
 .retry:hover {
-  background: rgb(211 47 47 / 0.08);
+  background: var(--c-danger-hover);
 }
 
 /* =============================================================================
@@ -516,7 +516,7 @@ body {
   background: var(--c-input-bg);
   border: 0;
   border-radius: 50%;
-  box-shadow: var(--c-bubble-shadow), 0 2px 6px rgb(11 20 26 / 0.15);
+  box-shadow: var(--c-bubble-shadow), 0 2px 6px var(--c-elevation-soft);
   animation: jump-in var(--dur-fast) var(--ease-out);
 }
 
@@ -542,7 +542,7 @@ body {
 }
 
 /* =============================================================================
-   10. Quick replies (populated in task 5)
+   10. Quick replies
    ========================================================================== */
 
 .quick-replies {
@@ -555,6 +555,26 @@ body {
 
 .quick-replies:not(:empty) {
   padding: var(--sp-4) var(--sp-5) 0;
+}
+
+.quick-reply {
+  flex: 0 0 auto;
+  padding: var(--sp-3) var(--sp-5);
+  font: var(--t-chip);
+  color: var(--c-accent);
+  cursor: pointer;
+  background: var(--c-input-bg);
+  border: 1px solid var(--c-accent);
+  border-radius: var(--chip-radius);
+}
+
+.quick-reply:hover {
+  background: var(--c-system-bg);
+}
+
+.quick-reply:focus-visible {
+  outline: 3px solid var(--c-focus-ring);
+  outline-offset: 2px;
 }
 
 /* =============================================================================

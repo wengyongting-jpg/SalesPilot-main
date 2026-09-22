@@ -34,7 +34,11 @@ function delay(ms, scale) {
 /** Minutes ago, as a Date. */
 const ago = (minutes) => new Date(Date.now() - minutes * 60000);
 
-const USD = (amount) => ({ amount, currency: 'USD' });
+// `pricingKnown` is part of the normalised cost shape, not decoration: the real
+// adapter maps `pricing_known` onto it, and `format.cost` renders an unpriced
+// model as unknown rather than as a number. The mock prices everything it
+// reports, so it says so explicitly rather than leaving the field to a default.
+const USD = (amount) => ({ amount, currency: 'USD', pricingKnown: true });
 
 const EXTRACTION_PROMPT_EXCERPT =
   'You are a sales intelligence extractor for CareSure Health Insurance.\n' +
@@ -897,6 +901,60 @@ export function createMockGateway({ latencyScale = 1 } = {}) {
       };
       data.messages[id] = [...(data.messages[id] ?? []), message];
       return { message };
+    },
+
+    /**
+     * Token and money totals across a conversation's runs.
+     *
+     * Mirrors `GET /api/admin/opportunities/{id}/cost`. `pricing_known` is carried
+     * because a genuine zero (no model was called) and an unknown cost are
+     * different facts, and the console renders them differently.
+     */
+    async getConversationCost(id) {
+      await delay(120, latencyScale);
+      const runs = data.runs[id] ?? [];
+      const totalTokens = runs.reduce(
+        (sum, run) => sum + (run.totals?.totalTokens ?? 0),
+        0
+      );
+      const priced = runs
+        .map((run) => run.totals?.cost)
+        .filter((cost) => cost && cost.amount !== null && cost.amount !== undefined);
+      return {
+        opportunityId: id,
+        runCount: runs.length,
+        totalTokens,
+        cost: priced.length
+          ? {
+              amount: Number(
+                priced.reduce((sum, cost) => sum + Number(cost.amount), 0).toFixed(8)
+              ),
+              currency: priced[0].currency ?? 'USD',
+              // camelCase, like every other normalised field. This was the one
+              // place the mock leaked a wire-shaped key.
+              pricingKnown: priced.every((cost) => cost.pricingKnown !== false),
+            }
+          : null,
+      };
+    },
+
+    async analytics() {
+      await delay(140, latencyScale);
+      const opportunities = Object.values(data.opportunities);
+      const tally = (pick) =>
+        opportunities.reduce((acc, opp) => {
+          const key = pick(opp);
+          acc[key] = (acc[key] ?? 0) + 1;
+          return acc;
+        }, {});
+      return {
+        total_opportunities: opportunities.length,
+        by_priority: tally((opp) => opp.priority ?? 'LOW'),
+        by_state: tally((opp) => opp.state),
+        by_product: tally((opp) => opp.product),
+        human_cases_total: data.cases.length,
+        human_cases_open: data.cases.filter((c) => c.statusToken === 'OPEN').length,
+      };
     },
 
     async seedDemoData() {

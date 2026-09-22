@@ -7,30 +7,21 @@ Two independent web applications for the SalesPilot demo:
 | **Customer chat** | The end customer. Sees only the conversation. | `customer/` |
 | **Admin console** | Sales staff and operators. Sees everything. | `admin/` |
 
-> ## Current status: no backend, no LLM
+> ## Current status: connected backend, optional LLM
 >
-> **Neither app is connected to the Python backend, and no language model is
-> involved anywhere.**
+> **Both apps are connected to the rebuilt Python backend by default.**
 >
-> Every screen you see is driven by a **mock transport** — scripted data held in
-> the browser. Nothing leaves the page, no API is called, and no model is
-> prompted. Specifically:
+> The normal transport is `salespilot`, targeting `http://127.0.0.1:8000`.
+> The backend can run visibly offline with rule-based extraction and template
+> replies, or use the configured OpenAI-compatible provider. Specifically:
 >
-> - The customer app's `salespilot` adapter is a **stub that throws**. Its default
->   transport is `mock`.
-> - The admin console's `salespilot` adapter is likewise a **stub that throws**,
->   and advertises every capability as unavailable. Its default is `mock`.
+> - The customer app uses the customer-tier message and conversation endpoints.
+> - The admin console uses the admin queue, case, reply and telemetry endpoints.
+> - A separate `mock` transport remains available for fixture-only development.
 > - The WhatsApp adapter is a **documented shape-only stub**. Selecting it fails
 >   loudly on purpose.
-> - Replies, opportunity scores, journey states, signals, token counts and costs
->   are all **fixture data**, not model output. Where the admin console shows an
->   agent run that it could not have measured, it labels it `Simulated run`.
->
-> This is deliberate, not unfinished work. The backend is mid-refactor, and the
-> visibility-tier split in `docs/api/interface-v1.md` §5.1 will move the admin
-> endpoints. Binding the adapters now would mean rework, so they wait until
-> interface v1 is frozen. See `docs/backend-contract.md` for the gap register and
-> the degradation currently in force for each item.
+> - Replies report `generation: "template"` in offline mode and `"llm"` only when
+>   a model actually produced the wording.
 
 ---
 
@@ -65,7 +56,7 @@ else.
 
 | Parameter | Effect |
 | --- | --- |
-| `transport` | `mock` (default), `salespilot`, `whatsapp` |
+| `transport` | `salespilot` (default), `mock`, `whatsapp` |
 | `customerId` | Which conversation the device represents |
 | `customerName` | Display name |
 | `scenario` | `fresh` (default) or `rendering` |
@@ -80,7 +71,7 @@ cd frontend
 node --test "tests/**/*.test.js"
 ```
 
-Currently **273 tests, 64 suites, ~0.9s**.
+Current baseline: **283 tests, 65 suites**.
 
 `package.json` exists *only* to declare `"type": "module"` so Node can import the
 apps' ES modules. It has no dependencies, nothing is ever installed, and browsers
@@ -207,10 +198,10 @@ Full rules in `.kiro/steering/frontend-conventions.md`. The load-bearing ones:
   fake login.
 - Delivery ticks reflect client-observed request milestones, not server-issued
   read receipts. The backend has no receipt mechanism.
-- Quick-reply chips never render, because the backend field does not exist yet.
-- A human representative cannot actually reply through the backend; the Inbox
-  composer works against the mock only, and the harness simulates the customer's
-  view of a human reply directly.
+- The customer app polls for representative replies only while human takeover is
+  active; this is a demo transport, not a push channel.
+- The WhatsApp adapter documents the intended boundary but does not call the
+  WhatsApp Cloud API.
 - All premium figures are fictional indicative demo rates.
 
 ## Related documents

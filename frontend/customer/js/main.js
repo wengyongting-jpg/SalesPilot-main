@@ -15,6 +15,7 @@ import { createBanner } from './views/banner.js';
 import { createMessageList } from './views/messageList.js';
 import { createComposer } from './views/composer.js';
 import { createJumpToLatest } from './views/jumpToLatest.js';
+import { createQuickReplies } from './views/quickReplies.js';
 
 document.title = strings.documentTitle;
 
@@ -30,6 +31,10 @@ const telemetry = createTelemetry();
 /** @type {ReturnType<typeof createGateway>|null} */
 let gateway = null;
 let bootError = null;
+let pollCursor = null;
+let pollTimer = null;
+let pollInFlight = false;
+let healthInFlight = false;
 try {
   gateway = createGateway(config);
 } catch (error) {
@@ -48,10 +53,17 @@ async function loadHistory() {
   }
   store.historyLoading();
   try {
-    const { messages = [], humanTakeover = false } =
+    const {
+      messages = [],
+      humanTakeover = false,
+      repName = null,
+      capabilities = null,
+    } =
       await gateway.loadHistory(customerId);
     store.historyLoaded(messages);
-    if (humanTakeover) store.takeoverChanged(true);
+    pollCursor = messages.at(-1)?.id ?? null;
+    if (capabilities) store.capabilitiesDetected(capabilities);
+    store.takeoverRestored(humanTakeover, repName);
     messageList.scrollToBottom();
   } catch (error) {
     console.error('[customer-chat] history load failed:', error);
@@ -84,20 +96,21 @@ async function send(text, retryClientId) {
       clientId: message.clientId,
     });
 
-    // The gateway does not surface a real HTTP status yet; the SalesPilot adapter
-    // will pass one through. 200 here means "resolved successfully".
+    // The live gateway surfaces the real HTTP status. Mock mode falls back to
+    // 200 because no HTTP exchange exists there.
     status = result?.status ?? 200;
 
     store.sendAcknowledged(message.clientId);
 
     if (result?.capabilities) store.capabilitiesDetected(result.capabilities);
 
-    store.replyReceived(result?.messages ?? []);
-    store.markRead(message.clientId);
-
+    const replies = result?.messages ?? [];
     if (typeof result?.humanTakeover === 'boolean') {
       store.takeoverChanged(result.humanTakeover, result.repName ?? null);
     }
+    store.replyReceived(replies);
+    pollCursor = replies.at(-1)?.id ?? pollCursor;
+    store.markRead(message.clientId);
     store.quickRepliesChanged(result?.quickReplies ?? []);
   } catch (error) {
     // Diagnostics go to the console; the customer sees a generic failed state.
@@ -123,6 +136,7 @@ async function reset() {
       console.error('[customer-chat] reset failed:', error);
     }
   }
+  pollCursor = null;
   store.conversationReset();
   composer.focus();
 }
@@ -131,6 +145,59 @@ function updateConnection() {
   // Requirement 8.3: reflect the browser going offline immediately, without
   // waiting for a request to fail.
   store.connectionChanged(navigator.onLine ? 'online' : 'offline');
+}
+
+async function checkHealth() {
+  if (!gateway || healthInFlight) return;
+  if (!navigator.onLine) {
+    store.connectionChanged('offline');
+    return;
+  }
+
+  healthInFlight = true;
+  store.connectionChanged('checking');
+  try {
+    store.connectionChanged((await gateway.health()) ? 'online' : 'offline');
+  } finally {
+    healthInFlight = false;
+  }
+}
+
+async function pollForMessages() {
+  if (!gateway || pollInFlight || !navigator.onLine) return;
+  pollInFlight = true;
+  try {
+    const result = await gateway.fetchSince(customerId, pollCursor);
+    const messages = result?.messages ?? [];
+    if (typeof result?.humanTakeover === 'boolean') {
+      store.takeoverChanged(result.humanTakeover, result.repName ?? null);
+    }
+    store.replyReceived(messages);
+    pollCursor = messages.at(-1)?.id ?? pollCursor;
+  } catch (error) {
+    // A reset from another surface removes the conversation. Treat that as an
+    // ended takeover and stop polling instead of logging the same 404 forever.
+    if (error?.status === 404) {
+      pollCursor = null;
+      store.takeoverRestored(false);
+      return;
+    }
+    console.error('[customer-chat] takeover poll failed:', error);
+  } finally {
+    pollInFlight = false;
+  }
+}
+
+function syncTakeoverPolling(state) {
+  const shouldPoll =
+    state.assistant.humanTakeover && state.capabilities.incrementalFetch;
+  if (shouldPoll && pollTimer === null) {
+    pollForMessages();
+    pollTimer = window.setInterval(pollForMessages, config.pollIntervalMs);
+  } else if (!shouldPoll && pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
 }
 
 // ---- Views -----------------------------------------------------------------
@@ -169,10 +236,16 @@ const composer = createComposer({
   onTyping: () => store.quickRepliesChanged([]),
 });
 
-const views = [header, banner, messageList, jumpToLatest, composer];
+const quickReplies = createQuickReplies({
+  el: document.getElementById('quickReplies'),
+  onSelect: (text) => send(text),
+});
+
+const views = [header, banner, messageList, jumpToLatest, quickReplies, composer];
 
 store.subscribe((state) => {
   for (const view of views) view.render(state);
+  syncTakeoverPolling(state);
   reportState(state);
 });
 
@@ -210,10 +283,9 @@ telemetry.onCommand((type, payload) => {
 
     case 'receive': {
       // Deliver an inbound message to the device without a round trip. This is
-      // how the harness shows what a *human representative's* reply looks like
-      // from the customer's side: in the real system the device would pick it up
-      // by polling, which needs a backend write path that does not exist yet
-      // (docs/backend-contract.md item 4).
+      // how the harness can preview a representative reply without persisting
+      // it. The ordinary Inbox path persists the reply and takeover polling
+      // retrieves it from the backend.
       const text = typeof payload.text === 'string' ? payload.text.trim() : '';
       if (!text) break;
 
@@ -239,9 +311,15 @@ telemetry.onCommand((type, payload) => {
 
 // ---- Start -----------------------------------------------------------------
 
-window.addEventListener('online', updateConnection);
+window.addEventListener('online', () => {
+  updateConnection();
+  checkHealth();
+  pollForMessages();
+});
 window.addEventListener('offline', updateConnection);
 updateConnection();
+checkHealth();
+window.setInterval(checkHealth, config.healthIntervalMs);
 
 if (bootError) {
   store.historyFailed();

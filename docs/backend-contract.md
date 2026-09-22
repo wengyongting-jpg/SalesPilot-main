@@ -16,19 +16,22 @@ SalesPilot REST API.
 
 This document has two halves:
 
-- **Part A — Current API. Superseded.** The field-level schema now lives in
-  **[`docs/api/interface-v1.md`](api/interface-v1.md) §4**, which is
-  self-contained. Part A is kept only as a reading convenience during the backend
-  refactor and carries no authority: if it disagrees with the interface document,
-  it is wrong. Do not add new schema detail here — add it there. Part A will be
-  deleted once interface v1 is frozen.
-- **Part B — Required changes.** Gaps the frontends hit, each with the reason, the
-  proposed shape, a test, and acceptance criteria. Frontends must **degrade
-  gracefully** while these are outstanding, never block on them.
+- **Part A — the frozen build's API. Historical.** It describes `salespilot/`, not what
+  is served. The live contract is
+  **[`docs/api/interface-v1.md`](api/interface-v1.md) §5**, which is frozen as of
+  2026-09-22 and self-contained. Part A carries no authority: where it disagrees with
+  the interface document, it is wrong. Add no schema detail here.
 
-New proposals are now recorded in `docs/api/interface-v1.md` §5 first, and appear
-here only when they need a test and acceptance criteria. Items 6 to 8 below were
-added that way.
+  It was going to be deleted once interface v1 was frozen. Keeping it instead, because
+  Part B below describes every change *relative* to it, and deleting it would leave
+  fifteen items comparing the present against nothing.
+- **Part B — the gap register.** Gaps the frontends hit, each with the reason, the
+  shape, a test and acceptance criteria. **All fifteen are now shipped** — see the
+  status table at the end of this file, which remains the signal a frontend keys its
+  capability detection against.
+
+Interface v1 is frozen, so this file is where a further change or a correction is
+raised first; it is then specified in an `interface-v2.md` rather than edited into v1.
 
 Terminology: this document covers only the **backend REST API** consumed by the
 frontends. The separate OpenAI-compatible *provider API* the backend uses to
@@ -38,10 +41,22 @@ reach an LLM is internal and out of scope here.
 
 ## Part A — Current API
 
-Base URL in development: `http://127.0.0.1:8000`. Start with:
+> **Part A describes the frozen `salespilot/` build and is historical.** Its paths are
+> not the ones now served. The live surface is `backend/`, which namespaces the staff
+> endpoints under `/api/admin/*` so the visibility tiers are a routing fact rather than
+> a client convention — `/api/opportunities` became `/api/admin/opportunities`,
+> `/api/cases` became `/api/admin/cases`, and the customer transcript moved to
+> `/api/conversations/{id}`.
+>
+> For the surface to integrate against, read
+> [`api/interface-v1.md`](api/interface-v1.md) §5, or start the server and read
+> `/docs`. Part A is kept because the gap register below refers back to it when
+> describing what changed.
+
+Base URL in development: `http://127.0.0.1:8000`. For the frozen build:
 
 ```powershell
-py -3 run.py --serve --seed
+py -3 run.py --serve --seed          # frozen; the live one is `py -3 -m backend`
 ```
 
 No authentication exists on any endpoint. Anyone who can reach the server can
@@ -880,6 +895,198 @@ individually inspectable on the admin surface.
 
 **Frontend degradation until shipped.** Priority and score render as today.
 
+### 15. CORS on the API — P0, blocks all browser integration — **SHIPPED 2026-09-22**
+
+> Renumbered from 13, which had been used twice: this item and the scoring one above
+> both claimed it. References elsewhere to "item 13, CORS" mean this section.
+>
+> **Shipped.** All six acceptance criteria verified, and asserted in
+> `backend/tests/test_api.py::TestBrowserOriginsArePermitted`. Implemented as
+> `_allow_development_origins` in `backend/api/app.py`, driven by
+> `config.CORS_ORIGINS`.
+>
+> *As implemented*, two details the specification left open:
+>
+> 1. **`OPTIONS` is listed explicitly** in `allow_methods`, and the default origin list
+>    covers **port 5500 as well as 8123** — that is the VS Code Live Server default, and
+>    a frontend opened that way would otherwise be blocked with a message that looks
+>    like a backend fault.
+> 2. **`allow_headers=["Content-Type"]` produces a wider echo than it reads like.**
+>    Starlette adds the CORS-safelisted request headers, so the response advertises
+>    `Accept, Accept-Language, Content-Language, Content-Type`. That is the
+>    specification's intent — those three are permitted on a cross-origin request with
+>    or without a header — but the value is not literally what was written, and a
+>    frontend asserting on the exact string would be surprised.
+>
+> An unknown origin is refused rather than silently allowed: the preflight returns
+> **400** with no `Access-Control-Allow-Origin` header. Worth stating because a
+> wildcard would satisfy every positive assertion in the list and is precisely what
+> this item rules out.
+
+**Current behaviour** *(before this shipped)*. The API sends no
+`Access-Control-Allow-Origin` header, and
+`backend/api/app.py` deliberately serves no static files — correctly, since the
+two apps under `frontend/` replace the legacy console.
+
+The consequence is that the apps and the API are always on different origins. In
+development the frontends are served by `py -3 -m http.server 8123` from
+`frontend/`, and the API listens on `8000`. A browser therefore refuses every
+`fetch` from the console or the chat to the API, before the request reaches the
+backend at all.
+
+Verified on 2026-09-22 against a live `py -3 -m backend --serve --seed`: the
+response headers are `content-length`, `content-type`, `date`, `server` — no CORS
+header of any kind.
+
+This is not a frontend workaround away. A static file server cannot add the
+header to someone else's response, and proxying would mean introducing a
+dev-server dependency, which the frontend's no-dependency rule forbids.
+
+**What this does and does not block.** The adapters are written and verified
+against the live API from Node, where no same-origin policy applies: the customer
+adapter passes 17 checks and the admin adapter 27, covering idempotent replay,
+the two-axis score, `generation`, rep-reply's 409 gate, cursor errors and the
+agent-run shape. So the *mapping* is proven. What is blocked is the last step —
+the same code running in a browser tab.
+
+**Expected behaviour.** Permit the development origins. A single middleware:
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=config.CORS_ORIGINS,   # e.g. ["http://127.0.0.1:8123", "http://localhost:8123"]
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type"],
+)
+```
+
+Driven by configuration rather than hard-coded, and defaulting to the development
+origins only. `allow_credentials` is not needed — there is no authentication
+anywhere — so it should stay off, and `allow_origins=["*"]` should be avoided even
+though nothing is protected, because it would set a habit that becomes a real
+hole the moment auth exists.
+
+**Test.**
+
+```bash
+# A preflight must be answered, and the actual request must carry the header.
+curl -s -i -X OPTIONS http://127.0.0.1:8000/api/messages \
+  -H "Origin: http://127.0.0.1:8123" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: content-type" | head -20
+
+curl -s -i http://127.0.0.1:8000/health \
+  -H "Origin: http://127.0.0.1:8123" | grep -i access-control-allow-origin
+```
+
+**Acceptance criteria.**
+
+1. A preflight `OPTIONS` to `/api/messages` from `http://127.0.0.1:8123` returns
+   2xx and lists `POST` in `Access-Control-Allow-Methods` and `content-type` in
+   `Access-Control-Allow-Headers`.
+2. `GET /health` with that `Origin` returns `Access-Control-Allow-Origin` echoing
+   it.
+3. `PATCH` and `DELETE` are permitted, since the console transitions cases and the
+   chat resets conversations.
+4. An origin outside the configured list is **not** granted the header.
+5. The allowed origins come from configuration, and the default covers only
+   loopback development origins.
+6. `allow_credentials` remains off.
+
+### 14. Taking a case over does not set `human_takeover` — P0, breaks the console's main workflow — **SHIPPED 2026-09-22**
+
+> **Shipped.** All five acceptance criteria verified, asserted in
+> `backend/tests/test_services.py::TestCaseService`. `CaseService.transition` now
+> claims the opportunity on `TAKEN_OVER`, symmetrically with the release it already did
+> on `CLOSED`.
+>
+> *How it stayed hidden*, which is worth recording. `backend/` had a test called
+> `test_taking_over_does_not_clear_the_flag` that asserted the flag was true after a
+> takeover, and it passed — because escalation had already set it, so the transition
+> could do nothing at all and the assertion still held. The defect only appears on the
+> second takeover, after a close has released the flag, which is criterion 5 and was
+> the one case not covered. The test has been renamed and the round trip added; the new
+> one was confirmed to fail against the unfixed code.
+
+**Current behaviour.** The flag and the case status move in only one direction.
+
+Measured on 2026-09-22 against a live `py -3 -m backend --serve --seed`:
+
+```
+opportunity C-1024
+  human_takeover before:            false
+PATCH /api/admin/cases/H-710C1B  {"status": "TAKEN_OVER"}   -> 200 "Taken Over"
+  human_takeover after PATCH:       false            <-- unchanged
+POST /api/admin/opportunities/C-1024/rep-reply          -> 409
+  "C-1024 is not under human takeover; a representative reply is not accepted
+   while the assistant is handling it"
+```
+
+Closing a case **does** clear `human_takeover` — that half is implemented and
+verified. Taking one over does not set it. The two transitions are asymmetric.
+
+**Why this blocks the admin console.** Its primary route is staff replying to a
+customer, and the intended workflow is: see the escalated case, take it over, the
+composer unlocks, reply. Step three cannot happen. The operator presses *Take
+over*, the case correctly reads `Taken Over`, and the composer stays disabled
+saying a takeover is required — which has just been done. The only way
+`human_takeover` becomes true today is the HITL escalation inside the pipeline, so
+once a case has been closed the conversation can never be taken over again through
+the API.
+
+This is not a frontend workaround away: the composer gate is `human_takeover`
+because that is the same flag `rep-reply` enforces with its 409, and guessing
+locally would produce a UI that offers a reply the server then refuses.
+
+**Expected behaviour.** Make the transition symmetric with the one that already
+works:
+
+| Transition | `human_takeover` | `human_intervention_required` |
+| --- | --- | --- |
+| → `TAKEN_OVER` | set **true** | leave as-is |
+| → `CLOSED` | set **false** (already correct) | set false (already correct) |
+| → `OPEN` | unchanged | unchanged |
+
+Reopening deliberately does nothing, because an open case means the assistant is
+still handling the conversation and nobody has claimed it.
+
+**Test.**
+
+```bash
+CASE=$(curl -s http://127.0.0.1:8000/api/admin/cases | python -c "import sys,json; print(json.load(sys.stdin)['items'][0]['id'])")
+OPP=$(curl -s http://127.0.0.1:8000/api/admin/cases | python -c "import sys,json; print(json.load(sys.stdin)['items'][0]['opportunity_id'])")
+
+curl -s -X PATCH http://127.0.0.1:8000/api/admin/cases/$CASE \
+  -H "Content-Type: application/json" -d '{"status":"TAKEN_OVER"}' > /dev/null
+
+curl -s http://127.0.0.1:8000/api/admin/opportunities/$OPP \
+  | python -c "import sys,json; print('human_takeover:', json.load(sys.stdin)['human_takeover'])"
+
+# Must now be accepted rather than 409.
+curl -s -o /dev/null -w "rep-reply: %{http_code}\n" -X POST \
+  http://127.0.0.1:8000/api/admin/opportunities/$OPP/rep-reply \
+  -H "Content-Type: application/json" -d '{"text":"hello","rep_name":"Alex"}'
+```
+
+**Acceptance criteria.**
+
+1. After a transition to `TAKEN_OVER`, `human_takeover` on the linked opportunity
+   is `true`.
+2. `POST .../rep-reply` on that opportunity then returns 200, not 409.
+3. After a transition to `CLOSED`, `human_takeover` is `false` and `rep-reply`
+   returns 409 again. (Already true; this guards it.)
+4. A transition to `OPEN` leaves the flag unchanged.
+5. A conversation can be taken over, closed, and taken over again through the API
+   alone, with no pipeline escalation in between.
+
+**Frontend degradation until shipped.** The composer distinguishes the two cases
+rather than repeating "take over first" at an operator who just did: when the
+linked case reads `Taken Over` but the flag is still false, it names the
+mismatch and points at this item. The workflow remains blocked — there is no
+honest way to unblock it client-side.
+
 ---
 
 ## Change log for this contract
@@ -889,34 +1096,44 @@ enable.
 
 | Date | Item | Priority | Status |
 | --- | --- | --- | --- |
-| 2026-09-22 | 1. Message idempotency | P0 | **Shipped** |
-| — | 2. Quick replies | P1 | Not started |
-| — | 3. Incremental fetch | P2 | Not started |
-| — | 4. Rep reply | **P0** (raised) | Not started |
-| — | 5. Message id / status | P3 | Not started |
-| — | 6. Visibility tiers | P0 | Not started |
-| — | 7. `author` field | P1 | Not started |
-| — | 8. Agent run telemetry | P1 | Not started |
-| — | 9. Rename `turns` | P2 | Not started |
-| — | 10. `generation` field | P1 | Modelled, not yet on the wire |
-| — | 11. `role` rename to `business` | P1 | Modelled, not yet on the wire |
-| — | 12. Admin incremental read | P2 | Not started |
-| — | 13. Two-axis scoring + qualification gate | P1 | Decided, not yet on the wire |
+| 2026-09-22 | 1. Message idempotency | P0 | **Shipped** — verified from the frontend |
+| 2026-09-22 | 2. Quick replies | P1 | **Shipped** — verified, 3 chips, labels ≤ 24 chars |
+| 2026-09-22 | 3. Incremental fetch | P2 | **Shipped** — `?since=` on the customer transcript |
+| 2026-09-22 | 4. Rep reply | P0 | **Shipped** — verified, 409 when not under takeover |
+| — | 5. Message id / status | P3 | Partly: ids shipped; no delivery status, and none needed |
+| 2026-09-22 | 6. Visibility tiers | P0 | **Shipped** — customer reply leaks zero intelligence keys |
+| 2026-09-22 | 7. `author` field | P1 | **Shipped** — plus `generation` and `rep_name` |
+| 2026-09-22 | 8. Agent run telemetry | P1 | **Shipped** — steps, `detail`, totals, violations |
+| 2026-09-22 | 9. Rename `turns` | P2 | **Shipped** — `customer_message_count`, alias retained |
+| 2026-09-22 | 10. `generation` field | P1 | **Shipped** — `llm` / `template` / `human`, with `author` as a separate axis |
+| 2026-09-22 | 11. `role: "business"` | P1 | **Shipped** — no transitional alias; a closed set with a deprecated member is not closed |
+| 2026-09-22 | 12. Incremental admin read | P2 | **Shipped** — `?since=` and `?history_limit=` on the admin profile |
+| 2026-09-22 | 13. Two-axis scoring + gate | P1 | **Shipped** — spam is held and absent from the queue; only a human disqualifies |
+| 2026-09-22 | 14. Takeover sets `human_takeover` | **P0** | **Shipped** — the round trip works with no escalation in between |
+| 2026-09-22 | 15. CORS on the API | **P0** | **Shipped** — loopback origins from configuration, no wildcard, credentials off |
 
-**Reading "not yet on the wire".** The rebuild is being built in phases
-(`docs/backend-plan.md` §9) and its HTTP surface arrives in the last two. Items 10,
-11 and 13 exist in the rebuild's domain model and deterministic kernel as of
-2026-09-22 and behave as specified there, but **no endpoint serves them yet**, so a
-frontend adapter must still treat them as absent. Only `Shipped` means an adapter can
-rely on a field arriving. The status here will become `Shipped` when the endpoint
-does.
+Items 1–4 and 6–9 were verified from the frontend against a live
+`py -3 -m backend --serve --seed` on 2026-09-22: 17 checks through the customer
+adapter and 27 through the admin adapter. The two things that still blocked a
+*browser* — item 15 (no CORS headers) and item 14 (takeover did not set the flag) —
+shipped later the same day, so nothing on the backend side remains outstanding.
 
-Progress for the curious, not for integration: `backend/` has `domain/` and
-`kernel/` complete with 101 tests. Item 13's measured effect — advertising spam now
-held and absent from the queue, where it previously scored 96 and outranked a genuine
-customer at 82 — is recorded in `docs/backend-plan.md` §9 under P2.
+Two wire details differed from what this register originally proposed, and the
+adapters follow the implementation rather than the proposal:
 
-**Where items 2-11 will be implemented.** In `backend/`, the rebuild. **`salespilot/`
+- **`role` is `"customer"` / `"business"`**, not `"customer"` / `"agent"`.
+- **The score is two-axis** — fit and behaviour, each with its own total — and
+  `score.total` is explicitly display-only. Ranking comes from `priority`, so the
+  console orders the queue by priority and uses the score only to break ties.
+Items 10 to 15 were listed here separately while the rebuild's HTTP surface did not
+exist yet, in states such as "modelled, not yet on the wire". That distinction has
+expired: every one of them is now served by an endpoint, so the single table above is
+the only status list, and `Shipped` there means an adapter can rely on the field
+arriving. Item 13's measured effect — advertising spam held and absent from the queue,
+where it previously scored 96 and outranked a genuine customer at 82 — is recorded in
+`docs/backend-plan.md` §9 under P2.
+
+**Where items 2-15 are implemented.** In `backend/`, the rebuild. **`salespilot/`
 is frozen as of 2026-09-22 and will be discarded once the rebuild lands** — it
 receives no further changes of any kind, including the correctness fixes previously
 planned for it. The reasoning is in `docs/backend-plan.md` §2: the frontend has

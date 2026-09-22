@@ -53,6 +53,10 @@ export const strings = {
     micLabel: 'Voice messages are not available',
   },
 
+  quickReplies: {
+    label: 'Suggested replies',
+  },
+
   message: {
     retryLabel: 'Retry sending message',
     /** Used while backend idempotency is unavailable (requirement 2.10). */

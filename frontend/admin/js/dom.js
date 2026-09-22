@@ -94,3 +94,45 @@ export const skeleton = (rows = 4) =>
     { className: 'panel-section' },
     Array.from({ length: rows }, () => el('div', { className: 'skeleton-row' }))
   );
+
+/**
+ * A real `<table>` for genuinely tabular data.
+ *
+ * Score history, state history and agent-run steps are columnar data — time,
+ * value, state, reason — and were previously a stack of `<div>`s, which gives a
+ * screen-reader user no way to know which column a cell belongs to. Column
+ * headers are associated with `scope="col"`, and the caption names the table for
+ * assistive technology without occupying visual space.
+ *
+ * @param {object} spec
+ * @param {string} spec.caption announced name for the table
+ * @param {Array<string>} spec.headers
+ * @param {Array<Array<Node|string|number|null>>} spec.rows
+ * @param {string} [spec.className]
+ */
+export function dataTable({ caption, headers, rows, className = 'data-table' }) {
+  const head = el(
+    'tr',
+    {},
+    headers.map((label) => el('th', { attrs: { scope: 'col' }, text: label }))
+  );
+
+  const body = rows.map((cells) =>
+    el(
+      'tr',
+      {},
+      cells.map((cell) => {
+        const td = el('td');
+        if (cell instanceof Node) td.append(cell);
+        else td.textContent = cell === null || cell === undefined ? '' : String(cell);
+        return td;
+      })
+    )
+  );
+
+  return el('table', { className }, [
+    el('caption', { className: 'visually-hidden', text: caption }),
+    el('thead', {}, [head]),
+    el('tbody', {}, body),
+  ]);
+}

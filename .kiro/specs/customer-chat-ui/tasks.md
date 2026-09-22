@@ -75,7 +75,7 @@ degradation is named and the gap is already recorded in
   - Deduplicate on `id ?? clientId`.
   - Implement `AbortController` timeouts and map every failure class to the
     generic strings from `strings.js`.
-  - _Verify:_ start `py -3 run.py --serve --seed`, send "How much does CareSure
+  - _Verify:_ start `py -3 -m backend --serve --seed`, send "How much does CareSure
     Plus cost?" and confirm the reply renders with its disclaimer intact. Search
     the rendered DOM for `45`, `LOW`, `Potential Interest` and `nurtur` — none may
     appear. Send the same message twice and confirm two distinct bubbles with no
@@ -112,7 +112,7 @@ degradation is named and the gap is already recorded in
   - Add at least three mock scenarios: nurture, hesitation-then-competitor, and a
     path ending in takeover, plus the existing failure scenario.
   - Add the demo reset control, gated on `features.demoMode`, calling
-    `DELETE /api/opportunities/{id}` on the `salespilot` adapter.
+    `DELETE /api/conversations/{id}` on the `salespilot` adapter.
   - Accessibility pass: accessible names on every control, visible focus rings,
     polite live region on the list, keyboard reachability for composer, send,
     chips, retry and jump-to-latest, contrast spot-check against `ux-spec.md`.
@@ -143,7 +143,7 @@ degradation is named and the gap is already recorded in
 ## Sequencing notes
 
 Tasks 1–3 need no server at all, so they can proceed in parallel with any backend
-work. Task 4 is the first that requires `py -3 run.py --serve`.
+work. Task 4 is the first that requires `py -3 -m backend --serve`.
 
 If time runs short, the honest cut line is after task 5: the app then demonstrates
 the full conversation, product cards, handoff and resilience. Task 6's
@@ -155,8 +155,7 @@ sounds.
 
 - Tasks 1–5 complete, each verification step performed.
 - No console errors or unhandled rejections in a full scenario run.
-- No backend file modified; `git status` shows changes only under
-  `frontend/`, `.kiro/` and `docs/`.
+- Shared contract changes are covered by both backend and frontend tests.
 - No sales intelligence visible anywhere in the customer UI.
 - `docs/backend-contract.md` updated if any new gap was discovered.
 - `docs/frontend-changelog.md` left untouched unless the owner has explicitly

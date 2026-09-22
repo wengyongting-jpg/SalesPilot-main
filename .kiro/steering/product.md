@@ -20,8 +20,8 @@ The business name is fixed as **CareSure**. Do not introduce alternative brandin
 | End customer | WhatsApp-style chat app. Sees only the conversation. | `frontend/customer/` |
 | Sales staff | Trimmed admin console: opportunity queue, case takeover, customer detail. | `frontend/admin/` |
 
-These are **independent** from the pre-existing console in `salespilot/static/`.
-That legacy console stays untouched and is not to be extended or refactored.
+These are the two maintained product surfaces and both use the live `backend/`
+HTTP API by default. Mock adapters remain available for deterministic UI demos.
 
 Customers must never see internal sales intelligence (opportunity score,
 priority, detected signals, state names, next best action). That data belongs to
@@ -35,8 +35,7 @@ the admin surface only.
 - No voice notes, no image upload, no message reactions.
 - No internationalisation. The product is English-only; user-facing strings live
   in one module so translation stays possible later.
-- No rewrite of the legacy console, and no changes to the Python backend from
-  frontend work (see `tech.md`).
+- No direct model calls or business-rule reimplementation in either frontend.
 
 ## Compliance red lines
 

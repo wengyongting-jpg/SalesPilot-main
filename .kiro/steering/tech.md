@@ -4,101 +4,39 @@ inclusion: always
 
 # SalesPilot — technology and repository structure
 
-## Backend is read-only for frontend work
+## Runtime
 
-Frontend and backend are developed separately. When working on a frontend task:
-
-- **Do not modify anything under `salespilot/`, `tests/`, `run.py`, or
-  `requirements.txt`.** Read them freely to understand the API contract. The
-  knowledge base lives at `salespilot/data/knowledge_base.json`, so it is covered
-  by the `salespilot/` rule.
-- If a frontend requirement cannot be met with today's API, **do not patch the
-  backend**. Record the required change in `docs/backend-contract.md` (what is
-  needed, how to test it, how to accept it) and make the frontend degrade
-  gracefully so it is never blocked.
-- The legacy console in `salespilot/static/` is frozen. Do not extend it.
-
-## Backend, for reference only
-
-Python 3.10+ (developed on 3.14 via the `py` launcher). Stdlib-only decision
-engine; FastAPI + Uvicorn for the HTTP layer; SQLite or in-memory repository.
+- Backend: Python 3.10+, FastAPI/Uvicorn, SQLite or in-memory repository.
+- Frontend: vanilla HTML, CSS and JavaScript ES modules; no build step, CDN or
+  runtime dependency.
+- Model access: only `backend/agent/` may invoke a model. Provider resolution is
+  internal to the backend; browsers call only the REST API.
 
 ```powershell
 py -3 -m pip install -r requirements.txt
-py -3 run.py --serve --seed          # API + legacy console on http://127.0.0.1:8000
-py -3 run.py --demo                  # scripted demo, no server
-py -3 -m pytest tests/ -v            # backend test suite
+py -3 -m backend --serve --seed
+py -3 -m backend --demo
+py -3 -m unittest discover -s backend/tests
+node --test "frontend/tests/**/*.test.js"
 ```
 
-Two distinct APIs exist. Do not conflate them:
-
-- **Provider API** — the OpenAI-compatible endpoint the backend calls to reach an
-  LLM (`salespilot/providers/llm.py`). Internal to the backend. The frontend
-  never sees it and must never reference it.
-- **Backend REST API** — `/api/*` served by `salespilot/api/app.py`. This is the
-  frontend's only integration surface. Documented in `docs/backend-contract.md`.
-
-## Frontend tests
-
-The frontends maintain their own suite under `frontend/tests/`, run with **Node's
-built-in test runner** — no dependency, no install, no build step:
-
-```powershell
-cd frontend
-node --test "tests/**/*.test.js"
-```
-
-`frontend/package.json` exists **only** to declare `"type": "module"` so Node can
-import the apps' ES modules. It has no dependencies and browsers never read it.
-Do not add dependencies to it, and do not introduce a separate test framework.
-
-Tests cover pure logic only: rules, stores, formatting, identity, mock adapters
-and the telemetry protocol. There is no DOM environment, because adding one would
-mean adding a dependency. Logic that needs testing is therefore extracted into
-pure modules — `customer/js/rules.js` is the precedent — rather than left private
-inside a view.
-
-Per `AGENTS.md` Rule 2, adding new tests still needs the owner's agreement.
-
-## Frontend stack
-
-Vanilla **HTML + CSS + JavaScript (ES modules)**. No build step, no bundler, no
-npm dependencies, no framework.
-
-Rationale: both frontends are demo-scoped supporting surfaces, not the core
-innovation. A zero-dependency setup can be opened directly in a browser or served
-as static files, which removes install and build failure modes during a live
-demo. There is no open-source WhatsApp component library worth adopting — the
-official design system is not public, and third-party recreations carry trademark
-and proprietary-font risk.
-
-Constraints that follow from this choice:
-
-- No TypeScript, no JSX, no Sass. Plain `.js`, `.css`, `.html`.
-- No CDN `<script>` tags. Everything ships from the repository so the demo works
-  offline.
-- Target current evergreen browsers. ES modules, `fetch`, CSS custom properties
-  and `:has()` are all fair game.
+The customer and admin apps are served statically from `frontend/`, normally on
+port 8123, and call the backend on port 8000. The customer tier receives only the
+safe transcript projection; the admin tier receives sales intelligence.
 
 ## Repository layout
 
-```
-SalesPilot/
-├── salespilot/              # Backend (READ-ONLY for frontend work)
-│   ├── data/                # Knowledge base (backend-owned data)
-│   └── static/              # Legacy console — FROZEN
-├── frontend/
-│   ├── customer/            # Customer chat app
-│   └── admin/               # Trimmed staff console
-├── docs/
-│   ├── backend-handoff.md   # Track ownership, priorities, frozen contracts
-│   ├── backend-contract.md  # API reference + changes required of the backend
-│   ├── backend-changelog.md # Gated: update only when the user asks
-│   └── frontend-changelog.md# Gated: update only when the user asks
-└── tests/                   # Backend tests
+```text
+backend/                 API, services, kernel, agent, storage and observability
+backend/tests/           Backend suite
+frontend/customer/       Customer chat
+frontend/admin/          Staff console
+frontend/tests/          Dependency-free Node tests
+data/                    Approved knowledge and local runtime data
+evals/                   Multi-turn evaluation fixtures and runner
+docs/api/interface-v1.md Shared HTTP contract
 ```
 
-Shared frontend code (the gateway/adapter layer, the store, formatting helpers)
-is duplicated deliberately rather than shared through a build step. Keep each app
-self-contained; if a module must be shared, copy it and note the origin in a
-comment.
+Shared frontend code is duplicated deliberately so each static app is
+self-contained. All network access stays in gateway modules; views only render
+state, and stores hold presentation state rather than business rules.

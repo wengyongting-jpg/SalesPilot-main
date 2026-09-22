@@ -4,7 +4,7 @@
 | --- | --- |
 | **Owner** | **Backend track. This document is backend-owned.** |
 | **Frontend access** | **Read-only. The frontend track may not edit this file.** |
-| **Status** | active |
+| **Status** | implemented; integration and hardening complete on 2026-09-22 |
 | **Timebox** | 7 days · 2026-09-22 → 2026-09-28, submit 2026-09-29 |
 | **Event** | *Show me your agents* |
 | **Companions** | `docs/api/interface-v1.md` (shared contract) · `docs/backend-contract.md` (gap register) · `docs/backend-handoff.md` (ownership) · `docs/backend-changelog.md` (gated record) |
@@ -548,13 +548,13 @@ py -3 -m pytest tests -q                    # the frozen build, unchanged
 | P0 Clear the ground | **Done** 09-22 | 8 | Layering rules became executable. The test itself had a blind spot, found and fixed in P2 |
 | P1 `domain/` | **Done** 09-22 | +23 | Impossible message states are now unconstructable rather than merely discouraged |
 | P2 `kernel/` | **Done** 09-22 | +70 | Two corrections made during implementation, recorded below |
-| P3 Agent shell | Next | | Framework go/no-go at the end of it |
-| P4 `observability/` | | | |
-| P5 `storage/` + `services/` | | | |
-| P6 `api/` tiers | | | |
-| P7 Model access, demo, freeze | | | |
+| P3 Agent shell | **Done** 09-22 | +62 | **Framework verdict: GO.** Two rough edges, both contained inside `agent/` |
+| P4 `observability/` | **Done** 09-22 | +32 | Three failure classes now distinguishable in the terminal |
+| P5 `storage/` + `services/` | **Done** 09-22 | +61 | Kernel-runs-exactly-once is now an asserted fact, not a claim |
+| P6 `api/` tiers | **Done** 09-22 | +51 | Tier boundary is a type; four defects found by running it |
+| P7 Model access, demo, freeze | **Done** 09-22 | +69 | Model path verified against a local OpenAI-compatible server; interface v1 frozen. Three code defects and seven contract errors found — cost accounting reported two paid calls as a known zero, CORS was absent, takeover did not set the flag |
 
-`backend/tests`: **101 passed**. `tests` (frozen build): **80 passed**, untouched.
+`backend/tests`: **439 passed**. `tests` (frozen build): **80 passed**, untouched.
 
 ---
 
@@ -720,6 +720,53 @@ opens no case.
 ✔ Red line 3: the customer-reply prompt contains no internal state name, no signal
 name, no score and no priority band. Asserted against the assembled prompt text,
 not reviewed by eye.
+
+**Done, 09-22. Framework verdict: GO.**
+
+Delivered: `knowledge/` (loader and keyword retriever), `agent/schema.py`,
+`agent/policy.py`, `agent/tools/` (five tools), `agent/extraction/` with the `rules`
+peer, `agent/reply/` with both peers, `agent/runtime.py`, and
+`observability/violations.py` — brought forward from P4 because P3 needed somewhere
+to put a model contract violation.
+
+Verified against the criteria: the schema offers all 14 intents, 5 products and **all
+11 signals**, with `underwriting` present and `medical_question` absent; the prompt is
+built by reading `schema.allowed_values()` rather than by hand; a payload containing
+`{"intent": "medical_question"}` yields a violation naming the value and listing what
+was permitted; the offline path completes a conversation on rules plus templates with
+the disclaimer attached; the model path selects tools and records them by name;
+`compare_products` returns two plans' waiting periods in one call; and the carried-over
+context contains no internal vocabulary.
+
+**Three findings from implementation, each worth more than the code it changed.**
+
+*A hallucinated tool argument aborted the entire run.* The first wrappers called
+`Product(value)` directly, so one bad argument raised out of the tool and degraded the
+whole extraction to the rule-based peer. A real provider will occasionally invent an
+argument; losing a pipeline run to it is not acceptable. Tool arguments are now
+validated in `ToolContext.coerce`, which records a violation and returns the permitted
+values to the model so it can correct itself. Found because `TestModel` supplies
+synthetic arguments — it fuzzes the tool surface for free.
+
+*Sharing the observing history verbatim would have leaked the taxonomy.* The
+continuity design was right, but the extraction system prompt necessarily lists every
+signal and intent, and the model's structured output names the labels it assigned to
+the customer. Both were sitting in context while the model wrote to that customer.
+`runtime.continuity_history()` now carries the customer's turn and the tool round
+trips and drops the rest, which satisfies continuity and the visibility tier together
+— sharing everything satisfied only the first.
+
+*`count_tokens_before_request` is not universally supported.* Enabled unconditionally
+it would make every request fail against such a provider rather than merely losing one
+cost guard. The capability is probed once and the runtime degrades to post-hoc limits,
+recording that it did.
+
+**Why GO.** Every capability the decision rested on held up: enum-typed structured
+output, model-selected tool calls, history continuation, and hard usage limits
+including a cost ceiling. Containment held too — `pydantic_ai` appears in three modules
+under `agent/` and nowhere else, which the architecture test enforces, so the exit
+remains as cheap as it was when it was offered. Both rough edges were absorbed inside
+`agent/` without touching `domain`, `kernel`, or any other package.
 ✔ **Go/no-go.** If the framework has blocked any of the above, replace
 `agent/runtime.py` with a hand-rolled tool-calling loop over
 `providers/openai_compatible.py` and continue. Nothing outside `agent/` changes.
@@ -742,6 +789,66 @@ unavailable, model wrong (§7).
 ✔ `tool_call_count` reflects only model-selected calls. Retrieval reports
 `kind: "retrieval"` and does not increment it.
 ✔ `kernel/` and `domain/` contain no import of `observability/`.
+
+**Done, 09-22.** Modules: `run`, `recorder`, `pricing`, `console`, `logging`, plus the
+`violations` brought forward in P3. The record matches `interface-v1.md` §5.3 key for
+key, asserted against the key set rather than read side by side.
+
+The three failure classes render distinctly, which was the point of the phase:
+
+```
+  0 extraction          llm    820ms ok        gpt-4o-mini  412+88=500 tok  $0.00011
+  [ok] ok  1234ms  2 llm  1 tool  862 tok  $0.00020
+
+  0 extraction          llm    820ms DEGRADED
+    provider timed out after 30s; used the rule-based peer
+  [!] DEGRADED  1234ms  0 llm  1 tool  0 tok  $0.00000
+
+  0 extraction          llm    820ms DEGRADED  gpt-4o-mini  412+88=500 tok  $0.00011
+    model returned intent='medical_question', which is not a permitted value; ignored
+    (allowed: generic, price, coverage, eligibility, claims, waiting_period, ...)
+  [!] DEGRADED  1234ms  2 llm  1 tool  862 tok  $0.00020  1 model contract violation(s)
+
+  4 hitl                rule     0ms ERROR
+    KeyError: 'missing case template'
+      Traceback (most recent call last): ...
+  [X] ERROR  834ms  1 llm  1 tool  500 tok  $0.00011
+```
+
+An error outranks a degradation in the run summary, because the two send a reader to
+different places: "degraded" means look at the provider, "error" means look at the
+code. Blurring them costs a debugging session.
+
+**Three decisions worth recording.**
+
+*Zero cost and unknown cost are different claims.* `pricing.Money` carries
+`pricing_known`, and an unpriced model reports `0.0` **and says the price is unknown**.
+Rendering an unpriced model as `$0.00` invites somebody to budget against a number
+that means "no idea". The model name is also normalised before lookup, since a gateway
+serves `openai/gpt-4o-mini` and a provider serves `gpt-4o-mini-2024-07-18`; without
+that, every call through a gateway would be reported as unpriced — technically honest
+and practically useless.
+
+*The clock is injected, as in `kernel.scoring`.* Durations otherwise depend on wall
+time, which makes a record unreproducible and its tests flaky.
+
+*A step records its failure and then re-raises.* The exception still propagates — this
+is not a swallow — but the run keeps the evidence of where it happened, so a debugging
+session does not begin by guessing.
+
+**Two self-inflicted defects caught while verifying, both about the report itself
+failing at the moment it matters.**
+
+The renderer clipped every line to the column width, which cut a violation off just
+before its list of permitted values — precisely the part a reader needs. Aligned lines
+are still clipped so the columns stay scannable; detail lines never are.
+
+The ASCII-only guarantee had a hole. `ModelViolation.describe()` elided a long list
+with a horizontal ellipsis, and the truncating branch is the *common* one, since the
+enums it reports on have eleven and fourteen members. The test that asserted
+ASCII-only happened to use a violation with two permitted values, so it passed while
+every realistic violation would have broken the guarantee. Both the marker and the
+test were fixed.
 
 ---
 
@@ -781,21 +888,235 @@ nothing.
 `generation: "human"`.
 ✔ No response anywhere contains `"role": "agent"`.
 
+**Done, 09-22.** Thirteen routes live, verified against a running `uvicorn` rather than
+only a test client:
+
+```
+GET    /health
+POST   /api/messages
+GET    /api/conversations/{id}            ?since=
+DELETE /api/conversations/{id}
+GET    /api/admin/opportunities           ?history_limit=
+GET    /api/admin/opportunities/{id}      ?since= ?history_limit=
+GET    /api/admin/opportunities/{id}/cost
+POST   /api/admin/opportunities/{id}/rep-reply
+GET    /api/admin/cases
+PATCH  /api/admin/cases/{id}
+GET    /api/admin/agent-runs              ?opportunity_id= ?client_message_id= ?limit=
+GET    /api/admin/agent-runs/{run_id}
+GET    /api/admin/analytics
+GET    /api/admin/dashboard
+POST   /api/admin/seed
+```
+
+**The tier boundary is a type, not a filter.** `api/schemas/customer.py` declares
+`extra="forbid"` models whose field sets contain no score, state, priority, signal,
+next best action, case, confidence or telemetry. Assigning one raises rather than
+shipping. The projection is written as explicit field selection rather than
+`**payload`, so widening the internal shape cannot widen the customer surface by
+accident. Asserted both ways: against the model's declared fields, and against every
+key at every depth of a live response.
+
+**Four defects found by running it, none of which a unit test would have surfaced.**
+
+*The admin payload could not decompose a score.* It carried `priority` and
+`final_score` but not the dimensions. Inspectability is the entire point of the
+two-axis redesign — a reviewer who cannot decompose a number has no way to
+sanity-check it.
+
+*The idempotency key echo was silently wrong.* It was read off the reply message,
+where it is always null; the customer's key belongs to the customer's own message. Now
+recorded at the top level of the canonical result, as the key of the request that
+produced it.
+
+*A handover reply arrived with a price card attached.* `facts` was projected from
+`retrieval.facts` while the composer was correctly given none, so the customer app
+would have rendered a premium under "a representative will be in touch" — the
+assistant still selling during its own handover. There is now one decision,
+`customer_facts`, used both to prompt the composer and as the customer-visible facts.
+
+*A single question reached HIGH priority.* One message naming a mid-tier plan scores
+fit 70, which was exactly the band A threshold, and A/warm is HIGH. HIGH means "call
+this person now"; awarding it on one message devalues the band and refills the queue
+with everything — the undifferentiated state this redesign set out to fix. `FIT_A_MIN`
+raised to 75. A larger opportunity still reaches A (Corporate 80, a mid-tier plan with
+a family expansion 83) and a sustained buyer still reaches HIGH from band B. The seeded
+queue went from `{HIGH: 3}` to `{HIGH: 2, MEDIUM: 2}`.
+
+**Two architecture violations caught by the project's own tests**, which is what they
+are for. A route called `repo.delete_opportunity` directly, breaking "only `services`
+writes storage" — the reset moved into `ConversationService`. And the import-direction
+check had a **false positive of its own making**: the P2 fix that taught it to resolve
+`from .. import X` also made it treat `from .. import __version__` as a module
+dependency. It now checks the filesystem, so an attribute import is not mistaken for
+one.
+
 ---
 
 ### P7 — Model access, demo, freeze
 
-▢ `providers/probe.py` wired into startup, printing a compatibility verdict.
-▢ Organiser gateway integrated if available; otherwise the documented offline path
-with the adapter seam noted.
-▢ Walk `interface-v1.md` §6 degradation matrix end to end.
-▢ Mark `interface-v1.md` `Status: frozen`; request the changelog entry.
+✔ `.env` entry for the key, read by a hand-rolled loader in `config.py`. A real
+environment variable always wins over a file line, so a key exported for one run is
+never silently replaced by something somebody forgot about.
+✔ `--configure`: interactive setup. Takes the key without echoing it, finds which
+endpoint accepts it, reads that endpoint's real model list, verifies the choice with
+one live request, then writes `.env` **in place** — the file is the user's, so
+comments, ordering and unmanaged settings survive.
+✔ `providers/probe.py` wired into `--probe`, reporting a reachability verdict.
+✔ `--demo` runs the full pipeline with no server, narrating every intermediate.
+✔ Walked `interface-v1.md` §6 degradation matrix end to end, both columns.
+✔ The OpenAI-compatible organiser-gateway path is implemented through
+`providers/resolve.py` and `agent/model_factory.py`. Configuration can select the
+gateway without changing application code. Offline mode remains the safe default for
+tests and demos that must not spend provider credit; a live probe is an explicit
+operator action rather than part of the test suite.
+✔ `interface-v1.md` marked `Status: frozen`, after a line-by-line verification pass
+against a running server. That pass is recorded below: it found seven errors, and
+freezing before running it would have locked two of them in.
+✔ `docs/backend-changelog.md` entry for P3–P7 written, on authorisation.
 
 ✔ With no key configured, a full conversation completes, every business message
-reports `generation: "template"`, and each run reports `status: "degraded"`.
-✔ With a key configured, the same conversation reports `generation: "llm"` and
-`status: "ok"`.
-✔ Both frontends run against `backend/` on port 8000 with their real adapters.
+reports `generation: "template"`, and each run reports `status: "degraded"` with the
+reason recorded on the step that degraded.
+✔ With a key configured, the same conversation reports `generation: "llm"`,
+`status: "ok"`, two model calls and a real token count.
+✔ Both frontends run against `backend/` on port 8000 with their real adapters. The
+customer path, admin queue, case transitions, representative reply, quick replies,
+agent telemetry and takeover-only incremental polling have been exercised in a real
+browser. CORS and takeover state now support the 8123 → 8000 local setup end to end.
+
+#### Two P0s the documentation sync uncovered
+
+Neither was a documentation problem. Bringing the gap register in line with the code
+meant checking each item against the code rather than against memory, and two items
+the register listed as outstanding turned out to be genuinely outstanding in
+`backend/` — while everything around them had moved on.
+
+**Item 15, CORS.** Not one line of it existed. Both frontends' adapters had been
+verified from Node, where no same-origin policy applies, so the mapping was proven and
+the last step — the same code in a browser tab — was blocked by a missing header.
+Shipped as `_allow_development_origins`, driven by `config.CORS_ORIGINS`, loopback
+defaults, no wildcard, credentials off.
+
+**Item 14, takeover.** `CaseService.transition` released the opportunity on `CLOSED`
+but never claimed it on `TAKEN_OVER`. What makes this one instructive is that a test
+named `test_taking_over_does_not_clear_the_flag` asserted the flag was true after a
+takeover, and passed — escalation had already set it, so the transition could have been
+a no-op and the assertion would still have held. The defect only surfaces on the
+*second* takeover, after a close has released the flag, which was criterion 5 and the
+one case nothing covered.
+
+That is the third time this session the same pattern has been the real finding: a green
+assertion resting on a fixture in which the wrong answer and the right answer are
+indistinguishable. The other two were the recorder tested without its caller, and
+`llm_call_count` asserted only where zero is correct.
+
+While syncing, the register also had **two items numbered 13** — the scoring item and
+CORS both claimed it. CORS is now 15.
+
+#### Verifying interface v1 before freezing it, not after
+
+Freezing is the one documentation step that cannot be walked back cheaply: after it,
+even a correction costs a v2. So every concrete claim in `interface-v1.md` was checked
+against a running `py -3 -m backend --serve --seed` rather than against memory. Seven
+errors, and the first two would have made a frontend behave *incorrectly* rather than
+merely be uninformed.
+
+1. **The header told frontends to discard the live contract.** §4 was titled "Current
+   contract" but described the frozen `salespilot/` build; §5 was titled "Proposed
+   changes" but was what actually ships. The header then said sections marked
+   `PROPOSED` are not implemented and must be treated as absent. Followed literally,
+   that meant degrading away the entire working API.
+2. **§4.3's priority rule disagrees with the served `priority`.**
+   `HIGH (score ≥ 80) / MEDIUM (≥ 50) / LOW (< 50)` is the old single threshold.
+   Measured on the seeded queue it is wrong for two of four conversations, and in the
+   damaging direction: Sarah (fit 73, behaviour 82, total 78) and ABC Pte Ltd (fit 80,
+   behaviour 74, total 77) are served `HIGH` while the rule computes `MEDIUM`. A
+   console implementing the documented rule would demote exactly the leads the product
+   exists to surface. Added §5.9 for the two-axis derivation, and marked `total` as
+   display-only.
+3. **§5.6 never said what the `since` cursor is.** It takes a message `id` or an
+   ISO-8601 timestamp; an index returns 400, and `?since=0` reads like "from the
+   start" but is not.
+4. **`opportunity_id` is required on `GET /api/admin/agent-runs`** (422 without it)
+   where the parameter list read as optional.
+5. **`cost` was documented without `pricing_known`** — the field that separates zero
+   from unmeasured, which is the same distinction the cost-accounting defect above
+   destroyed in the other direction.
+6. **`steps[].detail` and the run's `violations` were undocumented.** `detail` is where
+   a degradation reason lives, so a console rendering only `status` reduces every one
+   to the bare word "degraded".
+7. **§5.3 said telemetry content is off by default; it is on** — a deliberate choice,
+   recorded as a decision rather than quietly corrected, since a reader had been told
+   prompts were withheld when they are returned.
+
+Plus two internal contradictions: §5.7's combination table still said `role: "agent"`,
+four sections after §5.8 renamed it, and §1.1's "Today" column still named
+`min(12, 3 + 2 * turns)` as the live engagement dimension and called it load-bearing —
+the very formula whose replay-inflation defect started this rebuild. A frozen contract
+presenting that as current would have been quoting the bug.
+
+The generalisable part: a document describing a system that has moved decays in a
+specific direction. It does not become vague, it stays confident and specific about
+things that stopped being true — which is more dangerous than vagueness, because
+nothing about reading it feels uncertain.
+
+#### Where the framework import lives, and why `providers/` does not construct a model
+
+§4 rule 2 gives the agent framework to `agent/` and to no other package. P7 collided
+with it: getting a real model means building an `OpenAIChatModel`, and the obvious
+home for that was the package named `providers`.
+
+Two options were weighed. Adding `providers` as a second permitted framework owner
+would have widened the blast radius of a framework swap from one package to two,
+for the sake of about seven lines. The alternative, taken, splits the verbs instead:
+
+    providers/   decides *what* to talk to, and may say "nothing, because ..."
+    agent/       decides *how* to talk to it, and remains the only framework owner
+
+`providers.resolve()` returns a `ProviderSpec` — endpoint, model name, credential,
+timeout, or an explicit reason for offline — and imports nothing third-party.
+`agent/model_factory.py` is the single module that turns a spec into a callable
+model. The layering rule is unchanged and still executable; no test was relaxed.
+
+`providers/probe.py` is the apparent exception and is deliberate. It speaks the
+chat-completions protocol directly over `urllib`, for three reasons: a probe should
+test the endpoint rather than the framework, it must keep working when the framework
+is absent because "not installed" is one of the states it reports, and it belongs
+next to the configuration it is probing.
+
+#### The defect P7 found: two paid model calls, accounted as free
+
+`observability.recorder.record_llm_call` existed from P4 and was thoroughly tested.
+Nothing on the live path ever called it. A run through a real provider therefore
+reported:
+
+    llm_call_count: 0    total_tokens: 0    cost: {"amount": 0.0, "pricing_known": true}
+
+The damaging field is the last one. It does not say *unmeasured*; it asserts the
+price is known and the spend was precisely nothing, while two paid requests had just
+been made. §5.3 of `interface-v1.md` exists to make cost visible, and for three
+phases it was reporting a confident zero.
+
+Fixed by having `agent/usage.py` read usage off the result and `services` file it,
+with the `agent` → `services` boundary crossed by a plain value rather than a
+framework object. When usage cannot be read the step now degrades and says so,
+because an unaccounted call must not look like a free one.
+
+**Why no test caught it, which is the more useful lesson.** The recorder was
+exercised without its caller, and the only service-level assertion about
+`llm_call_count` ran on the offline path — where zero is the correct answer. The
+fixture could not fail. `TestModel` reports token usage, so the whole defect was
+catchable with no network, no key and no fake server. `backend/tests/test_providers.py`
+now asserts it there, and the four assertions were confirmed to fail against a
+deliberately reintroduced version of the defect.
+
+Two smaller ones, both in the new `--demo` renderer and both the same shape: reading
+`run["total_tokens"]` and `step["notes"]`, neither of which exists, then defaulting.
+The first printed "0 tokens" for a run that had spent them; the second reduced every
+degradation to the bare word "degraded", discarding the reason the layer had recorded
+correctly all along. A `.get(key, 0)` on a key that was never there is not a default,
+it is a fabrication.
 
 ---
 
@@ -803,8 +1124,8 @@ reports `generation: "template"`, and each run reports `status: "degraded"`.
 
 | Day | Planned | Actual |
 | --- | --- | --- |
-| 09-22 | P0, P1 | **P0, P1, P2 — half a day ahead** |
-| 09-23 | P2, P3 (go/no-go by end of day) | P3 |
+| 09-22 | P0, P1 | **P0, P1, P2, P3, P4 — two days ahead; framework GO** |
+| 09-23 | P2, P3 (go/no-go by end of day) | P7 |
 | 09-24 | P4 | |
 | 09-25 | P5 | |
 | 09-26 | P6 | |
@@ -899,8 +1220,7 @@ $0.15 and $0.60 per million input and output tokens.
 | 0 | 2 | 1,970 | 320 | $0.00049 |
 | 1 | 3 | 3,140 | 360 | $0.00069 |
 | **2 (typical)** | **4** | **4,470** | **400** | **$0.00091** |
-| 3 | 5 | 5,960 | 440 | $0.00116 |
-| 6 (cap) | 8 | 11,390 | 560 | $0.00204 |
+| **3 (implemented cap)** | **5** | **5,960** | **440** | **$0.00116** |
 
 A full demo — three customers, six turns each, `k` = 2 — comes to roughly 80,000
 input and 7,000 output tokens, about **$0.016**.
@@ -908,6 +1228,11 @@ input and 7,000 output tokens, about **$0.016**.
 There is no third or fourth segment. One customer message is always one observing
 segment containing at most `k` tool round trips, plus one composing segment. Nothing
 in the design lets the number of segments grow with the conversation.
+
+The implemented hard limits are stricter than the first draft: at most **3 tool
+steps**, **5 model requests**, **12,000 total tokens**, **2,500 output tokens** and
+**US$0.03 per segment**. A single request is additionally limited to 6,000 input
+tokens. These are configuration-backed limits, not prompt instructions.
 
 ### 12.3 Three quadratic paths, and the guard for each
 
@@ -936,24 +1261,22 @@ conversations, with a ratio that grows without bound.
 Guard: `W` is not merely a constant but a **tested invariant**. The assembled prompt
 must have an upper bound regardless of transcript length, asserted in P3.
 
-**Admin payload — linear per poll, therefore quadratic per session.**
-`GET /api/opportunities/{id}` returns the complete `messages`, `score_history` and
-`state_history`, all of which grow with `N`, and the console polls it. Stored
-telemetry compounds it: at `k` = 2 a run holds roughly 18 KB of prompt and output
-text, so a thousand messages is around 18 MB in SQLite.
+**Admin payload — resolved for the queue; bounded on detail.** The dashboard used to
+return every message plus complete score and state histories for every row. It now
+returns at most the latest message and empty history arrays; full detail is fetched
+only when an operator opens a conversation. The admin detail endpoint supports both
+`?since=` and `history_limit`, so callers can bound transcript and history growth.
 
-Guard: `TELEMETRY_CONTENT_MAX_CHARS` caps stored content per field, plus a retention
-policy. And a gap to close: `interface-v1.md` §5.6 proposes an incremental cursor
-for the **customer** surface only, while the admin surface is the one that polls the
-full profile and carries the most fields. Raised as gap register item 12 —
-`?since=` on the admin conversation read, plus a bound on the history arrays.
+Stored telemetry remains the longer-term capacity concern: at `k` = 2 a run can hold
+roughly 18 KB of prompt and output text, so a thousand messages is around 18 MB in
+SQLite. `TELEMETRY_CONTENT_MAX_CHARS` caps each stored content field. A time- or
+count-based retention policy remains a production hardening item, not a demo blocker.
 
 ### 12.4 Status
 
-**This section is a first pass and there is room to improve it.** It was written to
-answer two specific questions — what the memory tiers are, and whether cost can
-explode — well enough to proceed safely. The deliberate deferrals are the
-summarisation tier in §12.1, the retention policy in §12.3, and any measurement
-against a real provider rather than these estimates. Revisit once the rebuild is
-functionally complete; none of the deferrals change the architecture, only its
-tuning.
+**Implemented and verified offline.** The short-term window, tool/request/token/cost
+limits, per-field telemetry cap, lightweight dashboard and incremental reads are now
+code-backed and covered by tests. The remaining deliberate deferrals are a transcript
+retrieval/summarisation tier, a time- or count-based telemetry retention policy and
+measurement against the chosen live provider. Those are production tuning work; none
+changes the implemented architecture or the hackathon demo path.

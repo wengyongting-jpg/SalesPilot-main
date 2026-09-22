@@ -315,7 +315,7 @@ scripted and manual, which suits the demo scope.
    is the primary regression check and needs no server.
 2. **Per-slice acceptance checks.** Every task in `tasks.md` carries a concrete
    observable check tied to numbered requirements.
-3. **Live integration.** Against `py -3 run.py --serve --seed`, confirming the
+3. **Live integration.** Against `py -3 -m backend --serve --seed`, confirming the
    documented response shape is consumed correctly.
 4. **Degradation check.** With the real backend, confirm absent `quick_replies`
    and absent message ids leave the UI functional — the capability matrix in

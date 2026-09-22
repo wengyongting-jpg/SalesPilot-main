@@ -37,6 +37,15 @@ export function createRepComposer({ el: root, onSend, onDraftChange }) {
       return { enabled: false, note: strings.composer.unsupported };
     }
     if (!state.conversation.opportunity.humanTakeover) {
+      // Two different situations, and conflating them would send the
+      // representative to click a button they have already clicked. "Take over
+      // the case" is only actionable advice while a case still can be taken
+      // over; once it reads Taken Over and the flag is still clear, the fault
+      // is the backend's.
+      const linked = state.conversation.linkedCase;
+      if (linked && linked.statusToken === 'TAKEN_OVER') {
+        return { enabled: false, note: strings.composer.takeoverNotApplied };
+      }
       return { enabled: false, note: strings.composer.needsTakeover };
     }
     return { enabled: true, note: null };

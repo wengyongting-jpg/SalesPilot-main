@@ -33,6 +33,7 @@ export function newClientId() {
  * @param {string} init.text
  * @param {Date|string|number} [init.ts]
  * @param {'sending'|'sent'|'read'|'failed'|null} [init.status]
+ * @param {string|null} [init.repName]
  * @param {Array<object>} [init.blocks]
  */
 export function createMessage({
@@ -43,6 +44,7 @@ export function createMessage({
   text,
   ts,
   status = null,
+  repName = null,
   blocks = [],
 }) {
   return {
@@ -53,6 +55,7 @@ export function createMessage({
     text,
     ts: ts instanceof Date ? ts : new Date(ts ?? Date.now()),
     status,
+    repName,
     blocks,
   };
 }
@@ -111,8 +114,15 @@ export function createStore() {
 
   /** Append a message unless it is already present (requirement 8.5). */
   const appendUnique = (message) => {
-    const key = messageKey(message);
-    if (state.messages.some((existing) => messageKey(existing) === key)) {
+    // A server echo has both a new server id and the optimistic client's id.
+    // Comparing only the preferred key would therefore miss the same message
+    // during the send/takeover polling race.
+    const duplicate = state.messages.some(
+      (existing) =>
+        (message.id && existing.id === message.id) ||
+        (message.clientId && existing.clientId === message.clientId)
+    );
+    if (duplicate) {
       return false;
     }
     state.messages.push(message);
@@ -244,7 +254,13 @@ export function createStore() {
      * @param {string|null} [repName]
      */
     takeoverChanged(active, repName = null) {
-      if (state.assistant.humanTakeover === active) return;
+      if (state.assistant.humanTakeover === active) {
+        if (active && repName && state.assistant.repName !== repName) {
+          state.assistant.repName = repName;
+          notify();
+        }
+        return;
+      }
 
       state.assistant.humanTakeover = active;
       state.assistant.repName = active ? repName : null;
@@ -259,6 +275,14 @@ export function createStore() {
         })
       );
 
+      if (active) state.quickReplies = [];
+      notify();
+    },
+
+    /** Restore server state without fabricating a new event in old history. */
+    takeoverRestored(active, repName = null) {
+      state.assistant.humanTakeover = active;
+      state.assistant.repName = active ? repName : null;
       if (active) state.quickReplies = [];
       notify();
     },

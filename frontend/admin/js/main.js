@@ -89,12 +89,32 @@ async function openConversation(id) {
   }
 }
 
+/**
+ * Re-read the open conversation without going through `conversationRequested`,
+ * so the representative's draft, the selected agent run and the scroll position
+ * survive. Used after a case transition.
+ */
+async function refreshConversation(id) {
+  if (!gateway) return;
+  try {
+    const result = await gateway.getConversation(id);
+    store.conversationLoaded(result);
+  } catch (error) {
+    console.error('[admin] conversation refresh failed:', error);
+  }
+}
+
 async function transitionCase(caseId, statusToken) {
   if (!gateway) return;
   store.transitionStarted(caseId);
   try {
     const updated = await gateway.updateCaseStatus(caseId, statusToken);
     store.transitionSucceeded(updated);
+    // The composer gates on the opportunity's takeover flag, which PATCH does
+    // not return and which we must not infer from the case status. Re-read it.
+    if (store.getState().selectedId === updated.opportunityId) {
+      await refreshConversation(updated.opportunityId);
+    }
     // The inbox row's takeover marker depends on this, so refresh it.
     loadInbox();
   } catch (error) {
@@ -203,28 +223,63 @@ const cases = createCases({
 
 /* ---- Panel tabs ---------------------------------------------------------- */
 
+/**
+ * Proper tab semantics: a tablist of tabs controlling labelled tabpanels, rather
+ * than buttons carrying `aria-pressed`. Arrow keys move between tabs, which is
+ * what a screen-reader or keyboard user expects of a tab strip.
+ */
+const PANEL_TABS = [
+  { key: 'intelligence', label: strings.panels.intelligence, panelId: 'panelIntelligence' },
+  { key: 'observability', label: strings.panels.observability, panelId: 'panelObservability' },
+];
+
 const panelTabsEl = document.getElementById('panelTabs');
-const panelTabs = [
-  { key: 'intelligence', label: strings.panels.intelligence },
-  { key: 'observability', label: strings.panels.observability },
-].map(({ key, label }) =>
-  el('button', {
+panelTabsEl.setAttribute('role', 'tablist');
+panelTabsEl.setAttribute('aria-label', strings.panels.tablistLabel);
+
+const panelTabs = PANEL_TABS.map(({ key, label, panelId }, index) => {
+  const tabId = `tab-${key}`;
+  const button = el('button', {
     className: 'panel-tab',
     text: label,
-    attrs: { type: 'button', 'aria-pressed': 'false' },
-    on: { click: () => store.panelChanged(key) },
-  })
-);
+    attrs: {
+      type: 'button',
+      role: 'tab',
+      id: tabId,
+      'aria-selected': 'false',
+      'aria-controls': panelId,
+    },
+    on: {
+      click: () => store.panelChanged(key),
+      keydown: (event) => {
+        const offset = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+        if (!offset) return;
+        event.preventDefault();
+        const next = PANEL_TABS[(index + offset + PANEL_TABS.length) % PANEL_TABS.length];
+        store.panelChanged(next.key);
+        panelTabs[PANEL_TABS.indexOf(next)].focus();
+      },
+    },
+  });
+
+  const panel = document.getElementById(panelId);
+  panel.setAttribute('role', 'tabpanel');
+  panel.setAttribute('aria-labelledby', tabId);
+
+  return button;
+});
+
 clear(panelTabsEl);
 panelTabsEl.append(...panelTabs);
 
 const panelTabsView = {
   render(state) {
     panelTabs.forEach((button, index) => {
-      const key = index === 0 ? 'intelligence' : 'observability';
-      const active = state.activePanel === key;
+      const active = state.activePanel === PANEL_TABS[index].key;
       button.classList.toggle('is-active', active);
-      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      // Only the selected tab is a tab stop; arrow keys move within the strip.
+      button.tabIndex = active ? 0 : -1;
     });
   },
 };
@@ -252,9 +307,19 @@ const routeView = {
  */
 async function fetchRunForExchange(clientMessageId) {
   if (!gateway || !store.getState().capabilities.telemetry) return;
+
+  // `/api/admin/agent-runs` requires `opportunity_id`; the correlation key alone
+  // returns nothing. The harness knows which customer the device represents, so
+  // it supplies both — key alone would look like "no telemetry" rather than a
+  // missing parameter.
+  const opportunityId = store.getState().harness.customerId;
+
   store.entryRunLoading(clientMessageId);
   try {
-    const { items } = await gateway.listAgentRuns({ clientMessageId });
+    const { items } = await gateway.listAgentRuns({
+      opportunityId,
+      clientMessageId,
+    });
     store.entryRunLoaded(clientMessageId, items[0] ?? null);
   } catch (error) {
     console.error('[admin] agent run lookup failed:', error);

@@ -11,10 +11,9 @@ views/  ──reads──▶  store  ──calls──▶  gateway adapter  ─�
    └────dispatch intent──┘◀────────normalised──────────┘
 ```
 
-The inversion from the customer app is deliberate and total: the customer adapter
-**discards** sales intelligence at the boundary, and the admin adapter **keeps all
-of it**. Both rules exist so the audience boundary lives in exactly one place per
-app and is structural rather than a matter of discipline.
+The inversion from the customer app is deliberate and total: the backend's typed
+customer projection cannot express sales intelligence, while the admin adapter
+keeps the full admin payload. The audience boundary is enforced server-side.
 
 Three routes: **Inbox** (landing), **Cases**, **Harness**.
 
@@ -24,12 +23,11 @@ Two adapters behind one interface, selected from config:
 
 | Adapter | Use |
 | --- | --- |
-| `mock` | Default. Scripted data, no network. The entire console runs on it. |
-| `salespilot` | Real backend. Deferred until `docs/api/interface-v1.md` v1 is frozen. |
+| `mock` | Scripted data, no network; useful for fixture-only UI work. |
+| `salespilot` | Default. Live `/api/admin/*` integration. |
 
-The backend is mid-refactor and the visibility-tier split (interface §5.1) will
-move admin reads to `/api/admin/*`. Binding to today's paths would be rework, so
-the first delivery is mock-only and `salespilot.js` is a stub that throws.
+The backend visibility tiers are complete. Queue, conversation, case, human reply,
+agent-run and health operations all use the live admin namespace.
 
 Interface:
 
@@ -251,8 +249,10 @@ require, so this adds no deployment constraint.
 representative's** reply looks like from the customer's side. When `author` is
 `human` the device also flips into takeover, because that is what the backend's
 semantics imply. This is the one thing no other surface can show: the Inbox
-composer writes through the backend rep-reply path, which does not exist yet, and
-in mock mode the device shares no backend with the console anyway.
+composer writes through the backend rep-reply path. In live mode the customer
+device receives that message through takeover-only incremental polling; in mock
+mode `receive` remains a direct visual-test command because the two adapters share
+no persistence.
 
 `inject` drives the device as if the customer had typed. **No control exposes it**,
 because typing in the device is the identical action; it is retained for scripted

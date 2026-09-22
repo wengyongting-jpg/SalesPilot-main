@@ -4,6 +4,6 @@
   "type": "module",
   "description": "Module-type declaration so Node's built-in test runner can import the app's ES modules. There are no dependencies, no build step and no install: the apps are served as static files and browsers never read this file.",
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test \"tests/**/*.test.js\""
   }
 }

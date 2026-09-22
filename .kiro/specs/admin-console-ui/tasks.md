@@ -152,8 +152,8 @@ line is after slice 4: Inbox, Cases, intelligence and observability together
 already tell the whole story, and the harness can be replaced in a demo by opening
 the customer app in a second window.
 
-`js/gateway/salespilot.js` stays a stub until `docs/api/interface-v1.md` is frozen.
-Writing it now would bind to paths that interface §5.1 is about to move.
+`js/gateway/salespilot.js` is complete against the frozen `/api/admin/*` contract;
+the mock remains for deterministic UI work.
 
 ## Definition of done
 
