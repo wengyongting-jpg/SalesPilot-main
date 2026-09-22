@@ -67,11 +67,32 @@ CREATE TABLE IF NOT EXISTS cases (
     status             TEXT NOT NULL,
     created_at         TEXT NOT NULL
 );
+
+-- P0-5: idempotency receipts. Stores the serialised response of the request
+-- that first used a client_message_id, so a replay after a network timeout can
+-- be answered without re-running the pipeline. Persisted (rather than kept in
+-- process memory) so deduplication survives an API server restart.
+CREATE TABLE IF NOT EXISTS message_receipts (
+    opportunity_id    TEXT NOT NULL,
+    client_message_id TEXT NOT NULL,
+    schema_version    INTEGER NOT NULL DEFAULT 1,
+    response          TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    PRIMARY KEY (opportunity_id, client_message_id)
+);
 """
+
+# Bump when the shape of the serialised /api/messages response changes, so a
+# stale receipt can be recognised during diagnosis. Receipts are still replayed
+# across versions on purpose: returning a slightly old shape is safer than
+# re-running the pipeline and inflating `turns` again, which is the exact bug
+# idempotency exists to prevent.
+_RECEIPT_SCHEMA_VERSION = 1
 
 
 class SqliteRepository(BaseRepository):
     def __init__(self, db_path: Optional[str | Path] = None) -> None:
+        super().__init__()
         path = Path(db_path) if db_path else config.DEFAULT_DB_PATH
         if str(path) != ":memory:":
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,7 +190,12 @@ class SqliteRepository(BaseRepository):
                 int(opp.human_takeover),
                 int(opp.human_intervention_required),
                 json.dumps([
-                    {"role": m.role, "text": m.text, "ts": m.ts.isoformat()}
+                    {
+                        "role": m.role,
+                        "text": m.text,
+                        "ts": m.ts.isoformat(),
+                        "client_message_id": m.client_message_id,
+                    }
                     for m in opp.messages
                 ]),
                 opp.created_at.isoformat(),
@@ -230,6 +256,40 @@ class SqliteRepository(BaseRepository):
             ).fetchall()
         return [_row_to_case(row) for row in rows]
 
+    # ---- Idempotency receipts (P0-5) ------------------------------------
+
+    def get_message_receipt(
+        self, opportunity_id: str, client_message_id: str
+    ) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT response FROM message_receipts "
+                "WHERE opportunity_id = ? AND client_message_id = ?",
+                (opportunity_id, client_message_id),
+            ).fetchone()
+        return json.loads(row["response"]) if row else None
+
+    def save_message_receipt(
+        self, opportunity_id: str, client_message_id: str, response: dict
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO message_receipts (
+                    opportunity_id, client_message_id, schema_version,
+                    response, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    opportunity_id,
+                    client_message_id,
+                    _RECEIPT_SCHEMA_VERSION,
+                    json.dumps(response, ensure_ascii=False),
+                    datetime.now().isoformat(),
+                ),
+            )
+            self._conn.commit()
+
     # ---- Lifecycle -------------------------------------------------------
 
     def close(self) -> None:
@@ -272,6 +332,9 @@ def _row_to_opportunity(row: sqlite3.Row) -> Opportunity:
             role=m["role"],
             text=m["text"],
             ts=datetime.fromisoformat(m["ts"]),
+            # Rows written before P0-5 have no key; default to None rather than
+            # failing to load an existing database.
+            client_message_id=m.get("client_message_id"),
         )
         for m in json.loads(row["messages"])
     ]
