@@ -52,6 +52,7 @@ _FACTUAL_INTENTS = {
 
 REASON_HUMAN_REQUEST = "Customer explicitly asked to speak to a person"
 REASON_COMPLAINT = "Complaint handling is outside the assistant's authority"
+REASON_CANCELLATION = "Policy cancellation requires human handling"
 REASON_NEGOTIATION = (
     "Commercial negotiation or discount request requires human handling"
 )
@@ -91,6 +92,9 @@ def evaluate(
 
     if det.intent is Intent.COMPLAINT:
         return REASON_COMPLAINT
+
+    if det.cancellation:
+        return REASON_CANCELLATION
 
     # A price *concern* is hesitation, not a negotiation (P0-1). Only an explicit
     # discount or price-match request lands here, and it says so plainly (P0-4).

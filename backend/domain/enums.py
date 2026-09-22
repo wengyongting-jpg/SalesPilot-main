@@ -145,6 +145,51 @@ class MessageAuthor(str, Enum):
     SYSTEM = "system"
 
 
+class KnowledgeField(str, Enum):
+    """The fields of a product the assistant may quote.
+
+    A closed set for the same reason the other enums are: the model is offered these
+    exact values as a tool argument, so it cannot ask for a field the knowledge base
+    has no answer for and then receive an improvised one.
+    `backend/tests/test_agent_shell.py` asserts that every value here exists on every
+    product, which binds the enum to the data rather than hoping they agree.
+    """
+
+    POSITIONING = "positioning"
+    TARGET_CUSTOMER = "target_customer"
+    ELIGIBILITY = "eligibility"
+    COVERAGE = "coverage"
+    PREMIUM = "premium"
+    DEDUCTIBLE = "deductible"
+    LIMITS = "limits"
+    WAITING_PERIOD = "waiting_period"
+    EXCLUSIONS = "exclusions"
+    CLAIMS = "claims"
+    PAYMENT = "payment"
+    RENEWAL = "renewal"
+
+
+class ReplyMode(str, Enum):
+    """How the assistant should pitch its reply, as decided by the kernel.
+
+    This is the only part of the kernel's verdict allowed to influence what the
+    customer reads, and it exists so that influence can happen without leaking.
+    The next best action is an instruction to a *representative* — "prioritise
+    immediate sales contact" — and forwarding its wording into a customer-facing
+    prompt invites the model to repeat it. A mode is an abstraction over the
+    decision: the kernel chooses it, and `agent.policy` owns the wording.
+    """
+
+    ANSWER = "answer"
+    NURTURE = "nurture"
+    ADDRESS_CONCERN = "address_concern"
+    CLOSE = "close"
+    HANDOVER = "handover"
+    WITHDRAWN = "withdrawn"
+    HOLD = "hold"
+    MAINTAIN = "maintain"
+
+
 class Qualification(str, Enum):
     """Whether this conversation belongs in the sales queue at all.
 

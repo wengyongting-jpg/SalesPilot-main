@@ -105,11 +105,21 @@ def _imported_roots(path: Path) -> set[tuple[str, int]]:
 
 
 def _backend_target(module: str) -> str | None:
-    """`backend.domain.enums` -> `domain`; anything else -> None."""
+    """`backend.domain.enums` -> `domain`; anything else -> None.
+
+    Returns None for a name that is not a real module or package. `from .. import
+    __version__` resolves to `backend.__version__`, which is an attribute of the
+    package rather than a dependency on anything — and this rule is about module
+    dependencies. Checking the filesystem is what keeps the previous fix to
+    `_imported_roots` from turning every attribute import into a false violation.
+    """
     parts = module.split(".")
     if parts[0] != PACKAGE or len(parts) < 2:
         return None
-    return parts[1]
+    name = parts[1]
+    if (BACKEND / name).is_dir() or (BACKEND / f"{name}.py").exists():
+        return name
+    return None
 
 
 class TestImportDirection(unittest.TestCase):

@@ -169,6 +169,30 @@ class TestEngagementDecay(unittest.TestCase):
         self.assertEqual(depths[-1], depths[-2], "depth must plateau, not run away")
         self.assertLess(depths[1] - depths[0], depths[-1], "returns must diminish")
 
+    def _genuinely_strong(self, hours_ago: float):
+        """An opportunity that really is HIGH when fresh: band A fit and hot behaviour.
+
+        Built explicitly rather than reusing `_engagement`, whose fixture scores fit 70
+        — band B since the threshold was raised, so it is not HIGH even when fresh and
+        would make the assertion below vacuous.
+        """
+        from backend.kernel import scoring
+
+        opp = opportunity(
+            product=Product.CORPORATE,
+            best_intent=Intent.APPLICATION,
+            signals=(Signal.PURCHASE,),
+            customer_messages=4,
+            last_seen_hours_ago=hours_ago,
+        )
+        return scoring.score(
+            opp,
+            Detection(intent=Intent.APPLICATION, product=Product.CORPORATE,
+                      signals=[Signal.PURCHASE]),
+            "how do I apply",
+            now=NOW,
+        )
+
     def test_a_long_silence_drops_a_strong_opportunity_out_of_high(self):
         """Decay has to be able to move a band, or it is decoration.
 
@@ -178,8 +202,8 @@ class TestEngagementDecay(unittest.TestCase):
         """
         from backend.domain.enums import Priority
 
-        fresh = self._engagement(hours_ago=0.5, messages=4)
-        abandoned = self._engagement(hours_ago=24 * 40, messages=4)
+        fresh = self._genuinely_strong(hours_ago=0.5)
+        abandoned = self._genuinely_strong(hours_ago=24 * 40)
         self.assertIs(Priority.HIGH, fresh.priority)
         self.assertIsNot(Priority.HIGH, abandoned.priority)
         self.assertEqual(fresh.fit_total, abandoned.fit_total, "fit must not decay")
@@ -334,6 +358,42 @@ class TestPriorityDerivation(unittest.TestCase):
             priority.derive(fit=80, behaviour=80, qualification=Qualification.QUALIFIED),
         )
 
+    def test_one_question_about_a_mid_tier_plan_is_not_yet_high(self):
+        """Found by running the API: a first message naming Plus produced fit 70,
+        behaviour 41 and came out HIGH.
+
+        HIGH means "call this person now". Awarding it for a single question devalues
+        the band and refills the queue with everything, which is the undifferentiated
+        state the redesign set out to fix. Band A should mean a clearly valuable and
+        well-identified opportunity: a mid-tier plan named once is not that yet.
+        """
+        from backend.kernel import priority
+
+        self.assertIsNot(
+            Priority.HIGH,
+            priority.derive(fit=70, behaviour=41, qualification=Qualification.QUALIFIED),
+        )
+
+    def test_a_larger_opportunity_still_reaches_band_a(self):
+        from backend.kernel import priority
+
+        # Corporate: need 40 + product 40 = 80. Plus with family expansion: 40+30+13.
+        for fit in (80, 83):
+            self.assertEqual(
+                "A", priority.fit_band(fit), f"fit {fit} should be band A"
+            )
+        self.assertEqual("B", priority.fit_band(70))
+
+    def test_sustained_engagement_still_reaches_high_at_band_b(self):
+        """Raising the A threshold must not make HIGH unreachable for a real buyer
+        who happens to want a mid-tier plan."""
+        from backend.kernel import priority
+
+        self.assertIs(
+            Priority.HIGH,
+            priority.derive(fit=73, behaviour=82, qualification=Qualification.QUALIFIED),
+        )
+
     def test_a_held_conversation_is_never_ranked_above_low(self):
         from backend.kernel import priority
 
@@ -343,6 +403,51 @@ class TestPriorityDerivation(unittest.TestCase):
                 priority.derive(fit=100, behaviour=100, qualification=level),
                 f"{level.value} must not outrank anything",
             )
+
+    def test_a_dormant_opportunity_is_not_top_of_the_queue(self):
+        """Found end to end: a customer who said "let me think about it" reached
+        Dormant/Lost and still came out HIGH, because priority read only the two
+        axes and never the state.
+
+        The state machine has already concluded this conversation is not live. A
+        representative's next call should not be to somebody who just asked for time.
+        """
+        from backend.kernel import priority
+
+        self.assertIs(
+            Priority.HIGH,
+            priority.derive(fit=80, behaviour=50, qualification=Qualification.QUALIFIED,
+                            state=OpportunityState.EVALUATION_HESITATION),
+        )
+        self.assertIsNot(
+            Priority.HIGH,
+            priority.derive(fit=80, behaviour=50, qualification=Qualification.QUALIFIED,
+                            state=OpportunityState.DORMANT_LOST),
+        )
+
+    def test_a_dormant_opportunity_keeps_its_value_for_re_engagement(self):
+        """Capped, not zeroed. The opportunity may be worth reviving later, which is
+        what the Dormant/Lost state and a re-engagement follow-up are for."""
+        from backend.kernel import priority
+
+        self.assertIs(
+            Priority.MEDIUM,
+            priority.derive(fit=95, behaviour=95, qualification=Qualification.QUALIFIED,
+                            state=OpportunityState.DORMANT_LOST),
+        )
+
+    def test_scoring_passes_the_state_through_to_the_band(self):
+        from backend.kernel import scoring
+
+        dormant = opportunity(
+            product=Product.CORPORATE, state=OpportunityState.DORMANT_LOST,
+            best_intent=Intent.PRICE, customer_messages=3, last_seen_hours_ago=0.2,
+        )
+        card = scoring.score(
+            dormant, Detection(intent=Intent.PRICE, product=Product.CORPORATE),
+            "let me think about it", now=NOW,
+        )
+        self.assertIsNot(Priority.HIGH, card.priority)
 
 
 class TestTheScenariosThatJustifiedTheRedesign(unittest.TestCase):

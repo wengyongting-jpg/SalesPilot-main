@@ -18,18 +18,17 @@ everything below it:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from ..domain.decision import NextBestAction
 from ..domain.detection import Detection
-from ..domain.enums import OpportunityState, Priority, Qualification, Signal
+from ..domain.enums import (
+    OpportunityState,
+    Priority,
+    Qualification,
+    ReplyMode,
+    Signal,
+)
 
-
-@dataclass
-class NextBestAction:
-    action: str
-    reason: str
-    priority: Priority
-    human_intervention_required: bool = False
+__all__ = ["NextBestAction", "recommend"]
 
 
 def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction:
@@ -43,6 +42,7 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
             action="Stop active sales follow-up — mark as Dormant/Lost",
             reason="The customer explicitly withdrew their purchase intent",
             priority=Priority.LOW,
+            reply_mode=ReplyMode.WITHDRAWN,
             human_intervention_required=False,
         )
 
@@ -54,6 +54,7 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
                 or "The conversation is not currently qualified as a sales opportunity"
             ),
             priority=Priority.LOW,
+            reply_mode=ReplyMode.HOLD,
             human_intervention_required=False,
         )
 
@@ -65,6 +66,7 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
                 "the assistant does not resume autonomous selling"
             ),
             priority=priority,
+            reply_mode=ReplyMode.HANDOVER,
             human_intervention_required=True,
         )
 
@@ -76,12 +78,14 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
                 action="Human sales intervention: address the competitive risk",
                 reason="High intent alongside a competitive comparison — needs a person",
                 priority=priority,
+                reply_mode=ReplyMode.HANDOVER,
                 human_intervention_required=True,
             )
         return NextBestAction(
             action="Contact the customer to close",
             reason="High purchase readiness — prioritise immediate sales contact",
             priority=priority,
+            reply_mode=ReplyMode.CLOSE,
             human_intervention_required=True,
         )
 
@@ -91,23 +95,27 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
                 action="Sales follow-up",
                 reason="A high-value opportunity in evaluation — prioritise follow-up",
                 priority=priority,
+                reply_mode=ReplyMode.ADDRESS_CONCERN,
             )
         if Signal.COMPETITIVE in signals:
             return NextBestAction(
                 action="Address the competitive concern and nurture",
                 reason="Competitive comparison detected — restate the value proposition",
                 priority=priority,
+                reply_mode=ReplyMode.ADDRESS_CONCERN,
             )
         if Signal.HESITATION in signals:
             return NextBestAction(
                 action="Nurture: identify the objection and address it",
                 reason="Hesitation detected — respond with grounded information",
                 priority=priority,
+                reply_mode=ReplyMode.ADDRESS_CONCERN,
             )
         return NextBestAction(
             action="Address the concern with grounded information",
             reason="Continued evaluation — provide factual support",
             priority=priority,
+            reply_mode=ReplyMode.ADDRESS_CONCERN,
         )
 
     if opp.state is OpportunityState.POTENTIAL_INTEREST:
@@ -116,11 +124,13 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
                 action="Explore the expansion opportunity and recommend the right plan",
                 reason="Expansion signal detected — identify the right product",
                 priority=priority,
+                reply_mode=ReplyMode.NURTURE,
             )
         return NextBestAction(
             action="Continue nurturing and clarify the need",
             reason="Early interest — nurture and guide toward the right plan",
             priority=priority,
+            reply_mode=ReplyMode.NURTURE,
         )
 
     if opp.state is OpportunityState.COLD_LEAD:
@@ -128,6 +138,7 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
             action="Answer and nurture: give basic information, clarify the need",
             reason="Cold lead — inform and identify the insurance need",
             priority=priority,
+            reply_mode=ReplyMode.ANSWER,
         )
 
     if opp.state is OpportunityState.CLOSED_ACTIVE:
@@ -136,18 +147,21 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
                 action="Create an expansion opportunity",
                 reason="An existing customer with an expansion signal",
                 priority=priority,
+                reply_mode=ReplyMode.MAINTAIN,
             )
         if opp.churn_risk:
             return NextBestAction(
                 action="Flag the retention risk and trigger a retention action",
                 reason="Churn risk detected on an active customer",
                 priority=priority,
+                reply_mode=ReplyMode.HANDOVER,
                 human_intervention_required=True,
             )
         return NextBestAction(
             action="Maintain the relationship",
             reason="Active customer — maintain engagement",
             priority=priority,
+            reply_mode=ReplyMode.MAINTAIN,
         )
 
     if opp.state is OpportunityState.DORMANT_LOST:
@@ -155,10 +169,12 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
             action="Schedule a follow-up to re-engage",
             reason="Dormant or lost — attempt re-engagement",
             priority=priority,
+            reply_mode=ReplyMode.NURTURE,
         )
 
     return NextBestAction(
         action="Continue nurturing",
         reason="No specific rule matched",
         priority=priority,
+        reply_mode=ReplyMode.ANSWER,
     )

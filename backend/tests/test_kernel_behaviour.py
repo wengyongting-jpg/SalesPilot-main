@@ -344,6 +344,14 @@ class TestHitl(unittest.TestCase):
         reason = self._evaluate(opportunity(), Detection(intent=Intent.COMPLAINT))
         self.assertIsNotNone(reason)
 
+    def test_a_policy_cancellation_escalates(self):
+        reason = self._evaluate(
+            opportunity(state=OpportunityState.CLOSED_ACTIVE),
+            Detection(cancellation=True),
+        )
+        self.assertIsNotNone(reason)
+        self.assertIn("cancellation", reason.lower())
+
     def test_a_personalised_medical_question_escalates_as_underwriting(self):
         reason = self._evaluate(
             opportunity(product=Product.PLUS), Detection(intent=Intent.UNDERWRITING)
