@@ -1,0 +1,164 @@
+# -*- coding: utf-8 -*-
+"""Next best action: what a representative should do, and whether they are needed.
+
+Derived from state, signals, score band and the risk flags. The assistant recommends
+*sales* actions only — it never recommends an underwriting, claims or pricing
+decision, and nothing here is an input to one.
+
+Three gates run before the state rules, in this order, because each overrides
+everything below it:
+
+    withdrawn   the customer said no. Stop active follow-up. Continuing to
+                recommend a push would be the system arguing with the customer.
+    held        not a sales opportunity. No selling action, and no representative
+                consumed either — the point of holding is to spend nobody's time.
+    takeover    a person already owns it (P0-3). The AI does not resume autonomous
+                selling on a later message merely because that message did not
+                independently re-trigger escalation.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ..domain.detection import Detection
+from ..domain.enums import OpportunityState, Priority, Qualification, Signal
+
+
+@dataclass
+class NextBestAction:
+    action: str
+    reason: str
+    priority: Priority
+    human_intervention_required: bool = False
+
+
+def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction:
+    signals = set(det.signals) | set(opp.signals)
+    priority = opp.score.priority if opp.score else Priority.LOW
+
+    # ---- Gates -----------------------------------------------------------
+
+    if Signal.WITHDRAWAL in signals:
+        return NextBestAction(
+            action="Stop active sales follow-up — mark as Dormant/Lost",
+            reason="The customer explicitly withdrew their purchase intent",
+            priority=Priority.LOW,
+            human_intervention_required=False,
+        )
+
+    if opp.qualification is not Qualification.QUALIFIED:
+        return NextBestAction(
+            action="No sales action — awaiting review of whether this is a genuine enquiry",
+            reason=(
+                opp.qualification_reason
+                or "The conversation is not currently qualified as a sales opportunity"
+            ),
+            priority=Priority.LOW,
+            human_intervention_required=False,
+        )
+
+    if escalated or opp.human_takeover:
+        return NextBestAction(
+            action="Human take-over: a representative is handling the customer",
+            reason=(
+                "A restricted case or an escalation trigger requires human handling; "
+                "the assistant does not resume autonomous selling"
+            ),
+            priority=priority,
+            human_intervention_required=True,
+        )
+
+    # ---- State rules -----------------------------------------------------
+
+    if opp.state is OpportunityState.HIGH_INTENT:
+        if Signal.COMPETITIVE in signals or opp.competitive_risk:
+            return NextBestAction(
+                action="Human sales intervention: address the competitive risk",
+                reason="High intent alongside a competitive comparison — needs a person",
+                priority=priority,
+                human_intervention_required=True,
+            )
+        return NextBestAction(
+            action="Contact the customer to close",
+            reason="High purchase readiness — prioritise immediate sales contact",
+            priority=priority,
+            human_intervention_required=True,
+        )
+
+    if opp.state is OpportunityState.EVALUATION_HESITATION:
+        if priority is Priority.HIGH:
+            return NextBestAction(
+                action="Sales follow-up",
+                reason="A high-value opportunity in evaluation — prioritise follow-up",
+                priority=priority,
+            )
+        if Signal.COMPETITIVE in signals:
+            return NextBestAction(
+                action="Address the competitive concern and nurture",
+                reason="Competitive comparison detected — restate the value proposition",
+                priority=priority,
+            )
+        if Signal.HESITATION in signals:
+            return NextBestAction(
+                action="Nurture: identify the objection and address it",
+                reason="Hesitation detected — respond with grounded information",
+                priority=priority,
+            )
+        return NextBestAction(
+            action="Address the concern with grounded information",
+            reason="Continued evaluation — provide factual support",
+            priority=priority,
+        )
+
+    if opp.state is OpportunityState.POTENTIAL_INTEREST:
+        if signals & {Signal.EXPANSION_FAMILY, Signal.EXPANSION_CORPORATE}:
+            return NextBestAction(
+                action="Explore the expansion opportunity and recommend the right plan",
+                reason="Expansion signal detected — identify the right product",
+                priority=priority,
+            )
+        return NextBestAction(
+            action="Continue nurturing and clarify the need",
+            reason="Early interest — nurture and guide toward the right plan",
+            priority=priority,
+        )
+
+    if opp.state is OpportunityState.COLD_LEAD:
+        return NextBestAction(
+            action="Answer and nurture: give basic information, clarify the need",
+            reason="Cold lead — inform and identify the insurance need",
+            priority=priority,
+        )
+
+    if opp.state is OpportunityState.CLOSED_ACTIVE:
+        if signals & {Signal.EXPANSION_FAMILY, Signal.EXPANSION_CORPORATE}:
+            return NextBestAction(
+                action="Create an expansion opportunity",
+                reason="An existing customer with an expansion signal",
+                priority=priority,
+            )
+        if opp.churn_risk:
+            return NextBestAction(
+                action="Flag the retention risk and trigger a retention action",
+                reason="Churn risk detected on an active customer",
+                priority=priority,
+                human_intervention_required=True,
+            )
+        return NextBestAction(
+            action="Maintain the relationship",
+            reason="Active customer — maintain engagement",
+            priority=priority,
+        )
+
+    if opp.state is OpportunityState.DORMANT_LOST:
+        return NextBestAction(
+            action="Schedule a follow-up to re-engage",
+            reason="Dormant or lost — attempt re-engagement",
+            priority=priority,
+        )
+
+    return NextBestAction(
+        action="Continue nurturing",
+        reason="No specific rule matched",
+        priority=priority,
+    )
