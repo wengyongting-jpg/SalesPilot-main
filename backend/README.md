@@ -7,14 +7,14 @@
 > ```
 >
 > Both surfaces are live and both frontends can integrate against them. Everything
-> runs with **no model configured**: the pipeline completes on the rule-based and
+> runs in **offline mode by default**: the pipeline completes on the rule-based and
 > template peers, and every reply is marked `generation: "template"` so nothing is
 > mistaken for model output. `/health` reports `degraded: true` while that is the case.
 >
-> To use a real model instead, one command sets it up:
+> To verify the API is working correctly:
 >
 > ```powershell
-> py -3 -m backend --configure         # paste a key, pick a model, writes .env
+> py -3 -m backend --test-api          # zero-cost API test (offline mode)
 > ```
 >
 > **Interface v1 is frozen** as of 2026-09-22, so both frontends can build against a
@@ -38,7 +38,7 @@
 ## What works today
 
 ```powershell
-py -3 -m backend --configure    # interactive model setup, writes .env
+py -3 -m backend --test-api     # zero-cost API test (offline mode)
 py -3 -m backend --probe        # effective configuration, and whether it answers
 py -3 -m backend --demo         # the whole pipeline in the terminal, no server
 py -3 -m backend --serve --seed # the API on http://127.0.0.1:8000
@@ -50,6 +50,9 @@ kernel, the agent shell including its tool-calling loop, the run recorder, both
 repositories, the orchestrator, the HTTP tiers and provider resolution. Everything
 runs offline: the tool-calling loop against `TestModel`, the provider tests against a
 throwaway HTTP server on localhost. None of it needs a key or a network.
+
+`--test-api` runs a complete zero-cost test of the API pipeline in offline mode,
+verifying message processing and idempotency without any model calls.
 
 `--demo` is the one to reach for when the question is *what did the agent actually
 do*. It prints, for every turn, the detected intent and signals, the state transition,
@@ -69,7 +72,7 @@ happened in between.
 | **P4** | `observability/` — agent run records, cost accounting, terminal rendering | **done** |
 | **P5** | `storage/` + `services/` — persistence, idempotency, the orchestrator | **done** |
 | **P6** | `api/` — the HTTP surface, split by visibility tier | **done** |
-| **P7** | Model access, `--configure`, `--demo`, interface freeze | **done** |
+| **P7** | Model access, API testing, `--demo`, interface freeze | **done** |
 
 Every endpoint works offline: with no model configured the pipeline runs on the
 rule-based and template peers, and every reply is marked `generation: "template"`.
