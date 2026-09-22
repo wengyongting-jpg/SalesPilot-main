@@ -15,6 +15,8 @@ offline mode uses rule-based extraction and templates and labels that fact clear
 Python 3.10+ and a current Node.js are sufficient. The frontend has no packages to
 install and no build step.
 
+### Quick Start (Zero Cost)
+
 ```powershell
 py -3 -m pip install -r requirements.txt
 py -3 -m backend --serve --seed
@@ -33,10 +35,49 @@ Open:
 - Staff console: http://127.0.0.1:8123/admin/index.html#/inbox
 - API health: http://127.0.0.1:8000/health
 
-No API key is required. Without one, `/health` reports a degraded provider and the
-system answers with deterministic templates. To configure an OpenAI-compatible
-provider, run `py -3 -m backend --configure`; secrets are written to the ignored
-`.env` file and must never be committed.
+### Configuration
+
+**Default Mode: Offline (Zero Cost)**
+
+By default, the backend runs in offline mode using rule-based extraction and template
+replies. Every message is marked `generation: "template"` and `/health` reports
+`degraded: true`.
+
+To verify the API is working:
+
+```powershell
+py -3 -m backend --test-api    # Zero-cost API test
+py -3 -m backend --probe       # Check current configuration
+```
+
+**Optional: Enable LLM Mode (Costs Money)**
+
+⚠️ **Warning:** Enabling LLM mode will make API calls and incur charges.
+
+1. Copy the example configuration:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+2. Edit `.env` and set:
+   ```bash
+   SALESPILOT_LLM=gateway              # or 'openai'
+   SALESPILOT_LLM_API_KEY=your-api-key
+   SALESPILOT_LLM_MODEL=your-model-name
+   SALESPILOT_LLM_BASE_URL=https://your-endpoint/v1
+   ```
+
+3. Verify configuration:
+   ```powershell
+   py -3 -m backend --probe
+   ```
+
+**Cost Limits:**
+- Default: $0.03 per message (configurable via `SALESPILOT_LLM_COST_LIMIT_USD`)
+- Tool calls: max 3 per message
+- Token limit: 12,000 per message
+
+See [.env.example](.env.example) for all available configuration options.
 
 ## Verify
 
