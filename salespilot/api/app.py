@@ -27,6 +27,7 @@ from ..dashboard import render_dashboard
 from ..seed import seed_demo_data
 from ..storage import BaseRepository
 from .schemas import (
+    CaseStatusUpdate,
     IncomingMessage,
     serialize_agent_result,
     serialize_case,
@@ -73,12 +74,48 @@ def create_app(
 
     @app.post("/api/messages")
     def post_message(payload: IncomingMessage) -> dict:
+        """Process one customer message through the full agent pipeline.
+
+        P0-5 — idempotency. This endpoint mutates opportunity state: it appends
+        the message, increments `turns`, and re-runs the state machine and
+        scoring. Because the engagement dimension is derived from `turns`
+        (`salespilot/engine/scoring.py`), a retry after a network timeout used to
+        inflate the opportunity value score for an event that never happened.
+
+        When the caller supplies `client_message_id`, the serialised response is
+        stored as a receipt and a replay of the same key on the same conversation
+        returns that stored response verbatim, without touching any state. This
+        is replay semantics on purpose: the answer is "here is the response to
+        that request", not "here is the current state". A client that needs fresh
+        state re-reads GET /api/opportunities/{id}, which it already polls.
+
+        Omitting `client_message_id` preserves the original behaviour exactly.
+        """
+        key = (payload.client_message_id or "").strip() or None
+
+        # A blank customer_id means the agent will generate a fresh opportunity
+        # id, so no earlier receipt can exist for it — skip the lookup rather
+        # than guess a scope.
+        scope = payload.customer_id.strip()
+        if key and scope:
+            cached = sales_agent.repo.get_message_receipt(scope, key)
+            if cached is not None:
+                return cached
+
         result = sales_agent.handle_message(
             customer_id=payload.customer_id,
             customer_name=payload.customer_name,
             text=payload.text,
+            client_message_id=key,
         )
-        return serialize_agent_result(result)
+        response = serialize_agent_result(result)
+        if key:
+            # Keyed on the resolved opportunity id so a generated id is also
+            # deduplicated on any subsequent replay.
+            sales_agent.repo.save_message_receipt(
+                result.opportunity.id, key, response
+            )
+        return response
 
     @app.get("/api/opportunities")
     def list_opportunities() -> dict:
@@ -113,15 +150,20 @@ def create_app(
         }
 
     @app.patch("/api/cases/{case_id}")
-    def update_case_status(case_id: str, body: dict = None) -> dict:
-        """Transition a case status: OPEN → TAKEN_OVER → CLOSED."""
+    def update_case_status(case_id: str, body: CaseStatusUpdate) -> dict:
+        """Transition a case status: OPEN → TAKEN_OVER → CLOSED.
+
+        A missing or malformed body is rejected by the request model with 422; an
+        unknown status *value* still returns 400.
+        """
         from ..models import CaseStatus
-        cases = sales_agent.repo.list_cases()
-        case = next((c for c in cases if c.id == case_id), None)
+        case = next(
+            (c for c in sales_agent.repo.list_cases() if c.id == case_id), None
+        )
         if case is None:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        raw_status = (body or {}).get("status", "").upper().replace("-", "_").replace(" ", "_")
+        raw_status = body.status.upper().replace("-", "_").replace(" ", "_")
         try:
             new_status = CaseStatus[raw_status]
         except KeyError:
@@ -131,7 +173,9 @@ def create_app(
                 raise HTTPException(status_code=400, detail=f"Invalid status: {raw_status}")
 
         case.status = new_status
-        # Also update the opportunity's human_takeover flag
+        # Closing a case resumes autonomous AI selling on the next customer
+        # message. The admin console warns the representative about this, so the
+        # behaviour must be preserved.
         if new_status == CaseStatus.CLOSED:
             opp = sales_agent.repo.get_opportunity(case.opportunity_id)
             if opp:
@@ -139,14 +183,11 @@ def create_app(
                 opp.human_intervention_required = False
                 sales_agent.repo.upsert_opportunity(opp)
 
-        # Persist the case update
-        if hasattr(sales_agent.repo, 'update_case'):
-            sales_agent.repo.update_case(case)
-        else:
-            # Fallback: upsert via list (in-memory repo)
-            sales_agent.repo._cases = {c.id: c for c in cases}
-            sales_agent.repo._cases[case_id] = case
-
+        # `update_case` is declared on BaseRepository with a default
+        # implementation, so every repository provides it. The previous
+        # capability check plus `repo._cases` fallback was unreachable dead code
+        # that reached into the in-memory repository's private state.
+        sales_agent.repo.update_case(case)
         return serialize_case(case)
 
     @app.get("/api/dashboard")

@@ -21,6 +21,22 @@ class IncomingMessage(BaseModel):
     customer_id: str = ""
     customer_name: str
     text: str = Field(..., min_length=1)
+    # P0-5: optional client-generated idempotency key. When the same key is
+    # replayed for the same conversation the server returns the stored response
+    # instead of re-running the pipeline. Omitting it preserves the original
+    # (non-idempotent) behaviour exactly.
+    client_message_id: Optional[str] = None
+
+
+class CaseStatusUpdate(BaseModel):
+    """Body of PATCH /api/cases/{id}.
+
+    Accepts enum names (OPEN / TAKEN_OVER / CLOSED) or serialised values
+    ("Open" / "Taken Over" / "Closed"); the endpoint normalises spaces and
+    hyphens to underscores before resolving the enum.
+    """
+
+    status: str = Field(..., min_length=1)
 
 
 def serialize_next_best_action(nba) -> dict:
@@ -59,7 +75,16 @@ def serialize_opportunity(opp) -> dict:
         "human_intervention_required": opp.human_intervention_required,
         "turns": opp.turns,
         "messages": [
-            {"ts": m.ts.isoformat() if m.ts else None, "role": m.role, "text": m.text}
+            {
+                "ts": m.ts.isoformat() if m.ts else None,
+                "role": m.role,
+                "text": m.text,
+                # P0-5: echoed back so a client can reconcile a locally queued
+                # message with the stored one exactly, instead of matching by
+                # position from the end of the array. Null for agent replies and
+                # for customer messages sent without a key.
+                "client_message_id": m.client_message_id,
+            }
             for m in opp.messages
         ],
     }

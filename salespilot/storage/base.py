@@ -8,6 +8,14 @@ from ..models import HumanCase, Opportunity
 
 
 class BaseRepository(ABC):
+    def __init__(self) -> None:
+        # P0-5: idempotency receipts, keyed by (opportunity_id,
+        # client_message_id). Holds the serialised response of the request that
+        # first used the key, so a replay can be answered without re-running the
+        # pipeline. The default store is in-process; SqliteRepository overrides
+        # it with a table so deduplication survives a restart.
+        self._message_receipts: dict[tuple[str, str], dict] = {}
+
     # ---- Opportunities ---------------------------------------------------
 
     @abstractmethod
@@ -33,6 +41,20 @@ class BaseRepository(ABC):
 
     @abstractmethod
     def list_cases(self) -> list[HumanCase]: ...
+
+    # ---- Idempotency receipts (P0-5) ------------------------------------
+
+    def get_message_receipt(
+        self, opportunity_id: str, client_message_id: str
+    ) -> Optional[dict]:
+        """Return the stored response for a replayed key, or None if unseen."""
+        return self._message_receipts.get((opportunity_id, client_message_id))
+
+    def save_message_receipt(
+        self, opportunity_id: str, client_message_id: str, response: dict
+    ) -> None:
+        """Record the response produced for a client idempotency key."""
+        self._message_receipts[(opportunity_id, client_message_id)] = response
 
     # ---- Optional persistence hook --------------------------------------
 

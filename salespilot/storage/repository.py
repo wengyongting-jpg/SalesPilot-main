@@ -19,6 +19,7 @@ class Repository(BaseRepository):
     """Default in-memory repository (process lifetime; swap for SqliteRepository)."""
 
     def __init__(self) -> None:
+        super().__init__()
         self._opportunities: dict[str, Opportunity] = {}
         self._cases: dict[str, HumanCase] = {}
 

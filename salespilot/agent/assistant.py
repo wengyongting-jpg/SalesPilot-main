@@ -104,11 +104,22 @@ class SalesPilotAgent:
         customer_id: str,
         customer_name: str,
         text: str,
+        client_message_id: Optional[str] = None,
     ) -> AgentResult:
+        """Run the full pipeline for one customer message.
+
+        `client_message_id` is recorded on the stored message for traceability
+        and client-side reconciliation. Deduplication itself is handled one layer
+        up, in the API endpoint, before this method is reached — by the time
+        execution gets here the message is treated as new and `turns` advances
+        (P0-5).
+        """
         # 1) Context — load/create opportunity, append message
         opp = self._get_or_create(customer_id, customer_name)
         opp.turns += 1
-        opp.messages.append(Message(role="customer", text=text))
+        opp.messages.append(
+            Message(role="customer", text=text, client_message_id=client_message_id)
+        )
         context = opp.messages[-_CONTEXT_WINDOW:] if len(opp.messages) > 1 else None
 
         # 2) Intent & Context Understanding (LLM or rule-based extraction)
@@ -212,8 +223,10 @@ class SalesPilotAgent:
                 case = self.hitl.update_case(
                     existing_case, escalate_reason, opp, next_best_action.action
                 )
-                if hasattr(self.repo, 'update_case'):
-                    self.repo.update_case(case)
+                # `update_case` is part of BaseRepository (with a default
+                # implementation), so every repository provides it — no
+                # capability check needed.
+                self.repo.update_case(case)
             else:
                 case = self.hitl.create_case(opp, escalate_reason, next_best_action.action)
                 self.repo.add_case(case)

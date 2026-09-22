@@ -4,8 +4,12 @@ import os
 from pathlib import Path
 
 # Paths
-ROOT_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT_DIR / "data"
+# The knowledge base is backend-owned data, so it lives inside the package
+# rather than at the repository root. Runtime artefacts (logs, SQLite database)
+# stay at the root because they are generated, not shipped.
+PACKAGE_DIR = Path(__file__).resolve().parent
+ROOT_DIR = PACKAGE_DIR.parent
+DATA_DIR = PACKAGE_DIR / "data"
 KB_PATH = DATA_DIR / "knowledge_base.json"
 LOG_DIR = ROOT_DIR / "logs"
 LOG_FILE = LOG_DIR / "salespilot.log"

@@ -96,9 +96,16 @@ class CaseStatus(str, Enum):
 
 @dataclass
 class Message:
-    role: str                 # "customer" | "agent"
+    role: str                 # "customer" | "agent" — the side of the
+    #                           conversation, a deliberately closed set. Who
+    #                           *authored* an agent-side message (AI vs a human
+    #                           representative) is a separate axis and is not
+    #                           encoded here.
     text: str
     ts: datetime = field(default_factory=now)
+    # P0-5: client-generated idempotency key for the request that produced this
+    # message. Set only on customer messages sent with one; None otherwise.
+    client_message_id: Optional[str] = None
 
 
 @dataclass
