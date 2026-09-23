@@ -1,25 +1,27 @@
-# `backend/` — SalesPilot backend, under reconstruction
+# `backend/` — SalesPilot backend
 
-> ## ⚠ Not usable yet
+> ## This is the forward track
 >
-> **This package does not serve HTTP, does not call a model, and does not persist
-> anything.** It is a rebuild in progress. There is no working API here.
->
-> `py -3 -m backend --serve` will tell you so and exit non-zero. Only `--probe`
-> does anything useful today.
->
-> **If you need a running SalesPilot backend right now, use the frozen build:**
+> **All eight phases are in.** The package serves HTTP, runs a tool-calling
+> agent, persists to SQLite, records every run, and splits the customer and
+> staff surfaces by type rather than by filter.
 >
 > ```powershell
-> py -3 run.py --serve --seed      # salespilot/, on http://127.0.0.1:8000
+> py -3 -m backend --serve --seed      # http://127.0.0.1:8000, docs at /docs
 > ```
 >
-> That tree still works and its tests still pass. It is frozen and scheduled for
-> deletion once this rebuild lands, so do not add to it.
+> It runs with **no model configured**: extraction falls to the rule-based peer
+> and replies to templates, every business message reports
+> `generation: "template"`, and every run reports `status: "degraded"` so the
+> offline path is visible rather than silent. Configure a key and the same
+> conversation reports `llm` and `ok`.
+>
+> The frozen `salespilot/` tree still runs and its 80 tests still pass, but it
+> is no longer maintained and is scheduled for deletion. Do not add to it.
 
 | | |
 | --- | --- |
-| **Status** | Phases P0–P2 of 8 complete. No HTTP surface, no model access, no storage. |
+| **Status** | Phases P0–P7 of 8 complete. Serving, persistent, instrumented. |
 | **Owner** | Backend track. Read-only for the frontend track. |
 | **Plan** | [`docs/backend-plan.md`](../docs/backend-plan.md) — reasoning, target architecture, phase-by-phase acceptance criteria |
 | **Wire contract** | [`docs/api/interface-v1.md`](../docs/api/interface-v1.md) — authoritative request/response shapes |
@@ -31,12 +33,27 @@
 ## What works today
 
 ```powershell
-py -3 -m backend --probe        # report the effective configuration
+py -3 -m backend --probe             # effective configuration and model verdict
+py -3 -m backend --demo              # three scripted customers, in memory, with run traces
+py -3 -m backend --seed --db runtime/backend.db
+py -3 -m backend --serve --seed      # the API, on http://127.0.0.1:8000
 py -3 -m pytest backend/tests -q
 ```
 
-101 tests, covering the layering rules, the domain model and the whole deterministic
-kernel. Nothing above the kernel exists yet.
+231 tests, covering the layering rules, the domain model, the deterministic kernel,
+the agent shell, the run record, persistence, the orchestrator and both HTTP tiers.
+
+### The surface
+
+| Tier | Endpoints |
+| --- | --- |
+| Customer | `POST /api/messages` · `GET|DELETE /api/conversations/{id}` (`?since=`) |
+| Staff | `/api/admin/*` — opportunities, cases, dashboard, analytics, seed, `agent-runs`, `rep-reply`, `disqualify`, `release`, `held` |
+| Both | `GET /health` |
+
+The frozen build's `/api/*` paths answer as admin aliases during migration.
+What a customer receives is bounded by `api/schemas/customer.py`, which has no
+field for a score, a state, a signal or any telemetry.
 
 ## Progress
 
@@ -45,13 +62,14 @@ kernel. Nothing above the kernel exists yet.
 | **P0** | Package skeleton; layering rules made executable | **done** |
 | **P1** | `domain/` — the single source of truth for every wire string | **done** |
 | **P2** | `kernel/` — state machine, two-axis scoring, qualification gate, priority, next best action, HITL, takeover freeze, quick replies | **done** |
-| **P3** | `agent/` — the tool-calling loop, extraction and reply as model/offline peers, schemas generated from the enums | next |
-| **P4** | `observability/` — agent run records, cost accounting, terminal rendering | |
-| **P5** | `storage/` + `services/` — persistence, idempotency, the orchestrator | |
-| **P6** | `api/` — the HTTP surface, split by visibility tier | |
-| **P7** | Model access, demo, interface freeze | |
+| **P3** | `agent/` — the tool-calling loop, extraction and reply as model/offline peers, schemas generated from the enums | **done** |
+| **P4** | `observability/` — agent run records, cost accounting, terminal rendering | **done** |
+| **P5** | `storage/` + `services/` — persistence, idempotency, the orchestrator | **done** |
+| **P6** | `api/` — the HTTP surface, split by visibility tier | **done** |
+| **P7** | Model access, demo, interface freeze | **done** |
 
-Until **P6** there is no endpoint. Until **P3** no model is ever called.
+Outstanding: neither frontend's real adapter is written yet, so the two apps have
+not been run against this backend. That work belongs to the frontend track.
 
 ## Why a rebuild rather than a refactor
 

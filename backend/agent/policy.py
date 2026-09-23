@@ -35,26 +35,64 @@ MAX_HISTORY_MESSAGES = 6
 # raised false positives on completely ordinary sentences. Matching the exact
 # casing a raw enum interpolation would actually produce catches the real
 # defect (`f"...state: {opp.state.value}"`) without banning ordinary English.
-_FORBIDDEN_TOKENS: tuple[str, ...] = tuple(
+_ENUM_TOKENS: tuple[str, ...] = tuple(
     sorted(
         {member.value for member in OpportunityState}
         | {member.value for member in Signal}
         | {member.value for member in Priority}
-        | {"score", "priority", "qualification", "next best action", "HITL", "escalat"}
     )
 )
+
+# Distinctive enough (multi-word, Title Case, or an acronym) that ordinary
+# customer-facing English will not say them by accident — safe to check
+# against both a developer-authored prompt and a model's own free-form reply.
+_UNAMBIGUOUS_TOKENS: tuple[str, ...] = ("next best action", "HITL")
+
+# Plain English words a helpful reply may legitimately use ("priority
+# booking", "escalate to our hotline", "your qualification for this plan") —
+# real leak indicators only when they show up in a *developer-authored*
+# instruction or fact, never proof of one in the model's own generated
+# wording. Checked on the prompt going in, deliberately excluded from the
+# check on the model's reply coming back (`assert_reply_safe`), because that
+# earlier, broader check caused the reply's own ordinary vocabulary to be
+# misread as a leak and crash the turn.
+_PROMPT_ONLY_TOKENS: tuple[str, ...] = ("score", "priority", "qualification", "escalat")
+
+_FORBIDDEN_TOKENS: tuple[str, ...] = _ENUM_TOKENS + _UNAMBIGUOUS_TOKENS + _PROMPT_ONLY_TOKENS
 
 
 def assert_customer_safe(text: str) -> None:
     """Raise if `text` contains an internal state name, signal, score, or priority band.
 
     This is red line 3 (`docs/backend-plan.md` §3): anything placed in a
-    customer-reply prompt can appear in what the customer reads.
+    customer-reply prompt can appear in what the customer reads. Used on the
+    assembled prompt before it is sent — `text` here is always
+    developer-authored or KB content, never the model's own words, so the
+    full, generous token set is safe to check without false positives.
     """
     hits = [token for token in _FORBIDDEN_TOKENS if token in text]
     if hits:
         raise ValueError(
             "customer-facing prompt leaks internal vocabulary: " + ", ".join(hits)
+        )
+
+
+def assert_reply_safe(text: str) -> None:
+    """Raise if the model's own reply contains an internal state, signal, or
+    priority band literally.
+
+    Deliberately narrower than `assert_customer_safe`: `text` here is the
+    model's free-form output, which may legitimately use ordinary words like
+    "priority" or "escalate" in a normal customer-service sentence. Only the
+    enum-derived and unambiguous tokens are checked, and the caller degrades
+    to the template peer on failure rather than letting this propagate — a
+    genuine leak should never reach the customer, but it also should not
+    crash the turn.
+    """
+    hits = [token for token in _ENUM_TOKENS + _UNAMBIGUOUS_TOKENS if token in text]
+    if hits:
+        raise ValueError(
+            "reply leaks internal vocabulary: " + ", ".join(hits)
         )
 
 
@@ -97,6 +135,7 @@ def customer_safe_projection(
     escalate: bool = False,
     withdrawal: bool = False,
     takeover: bool = False,
+    greeting: bool = False,
     hesitation: bool = False,
     high_intent: bool = False,
 ) -> str:
@@ -119,6 +158,13 @@ def customer_safe_projection(
             "A person is now handling this conversation directly. Write a "
             "brief, warm holding reply that reassures the customer without "
             "making any sales pitch or offering new information."
+        )
+    elif greeting:
+        instruction = (
+            "This is the customer's first message and it does not ask about "
+            "anything specific yet. Greet them warmly, briefly say what you "
+            "can help with, and ask which plan interests them — do not list "
+            "detailed facts or premiums yet; save those for once they ask."
         )
     elif hesitation:
         instruction = (

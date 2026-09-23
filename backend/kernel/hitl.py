@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..domain.detection import Detection, RetrievalResult
+from ..domain.detection import Detection, HandoffProposal, RetrievalResult
 from ..domain.enums import Intent, OpportunityState, Product, Qualification, Signal
 
 # Below this retrieval confidence, a specific question about a known product is
@@ -64,6 +64,7 @@ REASON_COMPETITIVE = (
     "High purchase intent with competitive comparison — recommend human sales "
     "intervention"
 )
+REASON_ASSISTANT_PROPOSED = "Assistant proposed a handover"
 
 
 def evaluate(
@@ -72,6 +73,7 @@ def evaluate(
     retrieval: RetrievalResult,
     *,
     confidence_floor: float = ESCALATE_BELOW_CONFIDENCE,
+    proposal: Optional[HandoffProposal] = None,
 ) -> Optional[str]:
     """Return the escalation reason, or None when the assistant may continue.
 
@@ -79,6 +81,13 @@ def evaluate(
     for basic information and ordinary enquiries are answered directly — over-
     escalating is not cautious, it just moves the work to a person who did not need
     to do it.
+
+    `proposal` is the model's own request for a handover, read as one input among
+    several: the deterministic triggers run first, and a proposal on its own is
+    honoured only through the same gates a sales trigger passes — a qualified,
+    genuine enquiry not already owned by a person. The model proposes; these
+    gates decide. `accepts_proposal` says which way they went, so the run record
+    can show a proposal the kernel declined.
     """
     signals = set(det.signals)
 
@@ -100,9 +109,16 @@ def evaluate(
     if Signal.COMPLIANCE_RISK in signals or det.intent is Intent.UNDERWRITING:
         return REASON_UNDERWRITING
 
+    # `Intent.APPLICATION` is included alongside the obviously corporate
+    # intents: a corporate-product customer who is ready to buy ("sign up",
+    # "apply") classifies as APPLICATION by the extraction priority order
+    # (checked before CORPORATE_NEED), which previously let a ready-to-sign
+    # corporate lead skip this gate entirely and get an automated FAQ answer
+    # instead of the human handling a corporate quotation always requires.
     if opp.product is Product.CORPORATE and det.intent in (
         Intent.CORPORATE_NEED,
         Intent.PRICE,
+        Intent.APPLICATION,
     ) and Signal.PURCHASE in signals:
         return REASON_CORPORATE_QUOTE
 
@@ -126,9 +142,24 @@ def evaluate(
     ):
         return REASON_COMPETITIVE
 
+    if proposal is not None and accepts_proposal(opp, det, proposal):
+        detail = f": {proposal.reason}" if proposal.reason else ""
+        return f"{REASON_ASSISTANT_PROPOSED}{detail}"
+
     # Withdrawal is an outcome, not an escalation. Nobody needs to be paged because
     # a customer said no.
     return None
+
+
+def accepts_proposal(opp, det: Detection, proposal: HandoffProposal) -> bool:
+    """Whether a model-proposed handover passes the kernel's gates."""
+    return (
+        proposal.requested
+        and opp.qualification is Qualification.QUALIFIED
+        and det.genuine_enquiry
+        and not opp.human_takeover
+        and Signal.WITHDRAWAL not in det.signals
+    )
 
 
 def summarise(opp) -> str:

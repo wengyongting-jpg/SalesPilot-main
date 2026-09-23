@@ -50,8 +50,20 @@ class Extractor(Protocol):
     ) -> ExtractionOutcome: ...
 
 
+OFFLINE_REASON = "no model configured — rule-based extraction"
+
+
 class RuleExtractor:
-    """The offline peer: always available, never calls a model."""
+    """The offline peer: always available, never calls a model.
+
+    `offline=True` marks the step degraded. The implementation is a first-class
+    peer, not a stub — but a *run* that never reached a model did not run at
+    full capability, and `interface-v1.md` §5.7 requires that to be visible
+    rather than indistinguishable from a model-backed run.
+    """
+
+    def __init__(self, *, offline: bool = False) -> None:
+        self._offline = offline
 
     def extract(
         self,
@@ -64,8 +76,15 @@ class RuleExtractor:
             return ExtractionOutcome(detection=rules.extract(text, context), source="rule")
         with recorder.step("extraction", "rule") as step:
             detection = rules.extract(text, context)
-            step.note(f"intent={detection.intent.value} product={detection.product.value}")
-        return ExtractionOutcome(detection=detection, source="rule")
+            if self._offline:
+                step.degrade(OFFLINE_REASON)
+            else:
+                step.note(f"intent={detection.intent.value} product={detection.product.value}")
+        return ExtractionOutcome(
+            detection=detection,
+            source="rule",
+            unavailable=OFFLINE_REASON if self._offline else None,
+        )
 
 
 class ModelExtractor:
@@ -88,7 +107,7 @@ class ModelExtractor:
 
 
 def build_extractor(model=None) -> Extractor:
-    """`model=None` selects the offline (rule-based) peer."""
+    """`model=None` selects the offline (rule-based) peer, and says so on the record."""
     if model is None:
-        return RuleExtractor()
+        return RuleExtractor(offline=True)
     return ModelExtractor(model)

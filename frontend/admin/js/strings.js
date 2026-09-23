@@ -285,10 +285,23 @@ export const strings = {
 };
 
 /** Maximum for each score dimension, per the 100-point model. */
+/**
+ * Per-dimension maxima, as the backend scores them.
+ *
+ * These were the frozen build's single-axis weights (30/20/20/15/15 = 100).
+ * The rebuild scores fit and behaviour as separate axes (gap register item
+ * 13), so the caps changed — see `backend/domain/opportunity.py`'s ScoreCard.
+ * With the old numbers a real payload rendered "product potential 30 / 20",
+ * i.e. a bar past its own maximum.
+ *
+ * Fit: need_identified 40, product_potential 40, expansion 20.
+ * Behaviour: purchase_intent 40, purchase_readiness 30, engagement 30.
+ * `need_identified` has no row here yet, so the fit axis is shown only in part.
+ */
 export const SCORE_DIMENSION_MAX = {
-  purchase_intent: 30,
-  purchase_readiness: 20,
-  product_potential: 20,
-  expansion: 15,
-  engagement: 15,
+  purchase_intent: 40,
+  purchase_readiness: 30,
+  product_potential: 40,
+  expansion: 20,
+  engagement: 30,
 };

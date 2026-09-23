@@ -25,10 +25,10 @@ export const config = {
    * in docs/api/interface-v1.md §5.1 will move admin reads to /api/admin/*, so
    * binding to today's paths would be rework. See design.md § Transport.
    */
-  transport: 'mock',
+  transport: 'salespilot',
 
   /** Empty string means same-origin. */
-  apiBase: '',
+  apiBase: 'http://127.0.0.1:8010',
 
   /** Relative path to the customer app, embedded by the harness route. */
   customerAppPath: '../customer/index.html',

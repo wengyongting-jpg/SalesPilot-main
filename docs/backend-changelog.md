@@ -1,7 +1,8 @@
 # Backend changelog
 
-Record of what changed in each update to the Python backend: `salespilot/**`,
-`tests/**`, `run.py`, `requirements.txt`.
+Record of what changed in each update to the Python backend: `backend/**`
+(the forward track), and the frozen `salespilot/**`, `tests/**`, `run.py`,
+`requirements.txt`.
 
 > **This file is updated only on explicit instruction from the repository owner.**
 >
@@ -44,6 +45,126 @@ changed, why, and anything a reviewer or demo operator needs to know.
 ---
 
 ## Entries
+
+## 2026-09-22 — `backend/` rebuild, phases P3–P7: agent shell, observability, persistence, API, freeze
+
+**Scope:** api, engine, detection, knowledge, storage, providers, tooling (all under `backend/`)
+**Contract items:** 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 — all now **Shipped**
+
+Closes out the rebuild plan in `docs/backend-plan.md`, five days ahead of its
+own calendar. Where the P0–P2 entry below built the deterministic core, this
+one builds everything above it: a model is called for the first time, every
+message is persisted, and the backend is reachable over HTTP.
+
+### Changed
+
+- **`agent/`** — a real tool-calling loop (pydantic-ai), with extraction and
+  reply as declared model/rule and model/template peer pairs rather than a
+  primary path and an exception-handler fallback. Structured-output schemas
+  and the tool surface are generated from `domain/enums.py`, so a value the
+  domain does not accept fails validation and is recorded as a named contract
+  violation — the structural fix for the frozen build's silent
+  `"medical_question"` drift. `agent/policy.py` enforces red line 3
+  (`assert_customer_safe`): the customer-reply prompt cannot contain an
+  internal state name, signal, score, or priority band, checked against the
+  assembled prompt text at runtime, not only in tests.
+- **`observability/`** — `AgentRun`/`RunStep`/`LlmCall`/`ToolCall` records,
+  cost computed server-side from a price table (absent, never `0`, when
+  unpriceable), and the §7 terminal block. The three failure classes —
+  program error, model unavailable, model wrong — are distinguishable on
+  every run for the first time.
+- **`storage/` + `services/`** — an in-memory and a SQLite repository behind
+  one contract; `services/conversation.py` runs the kernel as a fixed
+  sequence of calls (takeover → qualification → state → profile → scoring →
+  retrieval → hitl → next best action), never a tool the model can skip.
+  Idempotency on `client_message_id` replays the stored receipt verbatim.
+  `kernel/hitl.py` gained a `proposal` parameter so the model's own handover
+  request is read as one input among several; the kernel's deterministic
+  triggers still run first and can still decline it.
+- **`api/`** — the HTTP surface, split by visibility tier as a *type*:
+  `schemas/customer.py` has no field for a score, state, signal, next best
+  action, case internal, or telemetry, so a customer response cannot carry
+  one even by mistake. The frozen build's `/api/*` paths remain as admin
+  aliases during migration.
+- **Model access.** `providers/probe.py` is wired into `--probe` and
+  `--serve`, printing a real reachability verdict. Offline is visible, not
+  silent: with no model configured, every business message reports
+  `generation: "template"` and every agent run reports `status: "degraded"`.
+- **`docs/api/interface-v1.md` is now frozen** (§7 change log records it);
+  `docs/backend-contract.md`'s status table reads Shipped for all thirteen
+  items; `backend/README.md`'s banner reflects a serving, persistent,
+  instrumented backend.
+
+### Fixed
+
+- **`request_human_handoff` was written in P3 but never registered** on the
+  extraction agent, so the model could never actually propose a handover.
+  Caught in P4 self-review, before any test exercised it.
+- **Two observability defects, both found in self-review, not by a test
+  failing:** a model-selected tool call was recorded ahead of the step that
+  made it, misordering the run; and the console paired an `llm` step with a
+  call by position rather than by `purpose`, undercounting a multi-request
+  tool loop in its displayed token/cost total.
+- **An architecture-test blind spot.** `api/app.py` read `backend.__version__`
+  via `from .. import __version__`, which the layering scanner parsed as an
+  import of the `__version__` package. Switched to `import backend`.
+- **The offline path reported `status: "ok"`,** which contradicted
+  `interface-v1.md` §5.7 and contract item 10: a run with no model configured
+  must report `degraded`. The P4/P5 design had reasoned that the rule and
+  template peers are first-class, not fallbacks, and marked their steps `ok`
+  accordingly — true of the *peer*, not of the *run*, which did not reach
+  full capability regardless. Both peers now mark their step degraded when
+  selected because no model is configured, and unchanged when used as an
+  in-run fallback after a model failure.
+
+### Contract impact
+
+- All thirteen gap-register items are now on the wire, additive throughout —
+  no field shipped in P0–P2 changed shape. Adapters may rely on every field
+  in `docs/backend-contract.md`'s register.
+- Two acceptance criteria were superseded by the implementation rather than
+  broken by it: item 8 AC3 (`tool_calls` must stay empty) predates the P3
+  loop and is now naturally populated by model-selected calls only; item 10
+  AC2's `degraded` run also covers offline-as-configured, not only
+  offline-as-failure. Both are recorded in `docs/backend-contract.md`.
+
+### Verified
+
+- `py -3 -m pytest backend/tests -q` → **231 passed** (from 101 at the end of
+  P2).
+- `py -3 -m pytest tests -q` → **80 passed**, the frozen build untouched.
+- Both P7 acceptance checks walked as tests: a full conversation with no
+  model configured reports `generation: "template"` and `status: "degraded"`
+  throughout; the same conversation with a model configured reports `"llm"`
+  and `"ok"`.
+- `py -3 -m backend --serve --seed` started and exercised live over HTTP:
+  `/health`, `POST /api/messages`, `GET /api/conversations/{id}`, the full
+  admin opportunity/case/agent-run surface, and `/docs`.
+- Both frontends' real adapters were written against this API and driven
+  against a running server end to end in an actual browser, including the
+  full human-takeover round trip: a customer conversation escalating, the
+  admin console showing that same conversation's full intelligence, and a
+  representative's reply reaching the customer's open session on its own —
+  the customer app's polling loop (requirement 8.7) was wired in the same
+  session, keyed on `humanTakeover` and a tracked message-id cursor against
+  `GET /api/conversations/{id}?since=`. Neither app's own test suite
+  regressed (275 passed). This is frontend-track work and is not itself a
+  `backend/` change; recorded here because it is the first real exercise of
+  every endpoint this entry adds, and it caught a bug this suite could not:
+  the admin console's per-dimension score maxima still held the frozen
+  build's single-axis weights, so a real two-axis score rendered past its own
+  bar (e.g. "30 / 20"). Fixed in `frontend/admin/js/strings.js`.
+- **Not verified:** a real model endpoint. Only
+  `pydantic_ai.models.test.TestModel`/`FunctionModel` were exercised offline.
+
+### Known issues
+
+- `backend/kernel/scoring.py` has one unused import (`Priority`), pre-existing
+  from P2 and not touched by this work.
+- The telemetry retention policy and the summarisation tier named in
+  `docs/backend-plan.md` §12 remain deferred, as stated there.
+
+---
 
 ## 2026-09-22 — `backend/` rebuild, phases P0–P2: skeleton, domain, deterministic kernel
 

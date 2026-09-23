@@ -32,6 +32,7 @@ from pydantic_ai.usage import UsageLimits
 
 from ... import config
 from ...domain.detection import Detection, HandoffProposal
+from ...domain.enums import Intent
 from ...domain.message import Message
 from ...observability import RunRecorder, StepHandle
 from .. import policy, telemetry
@@ -44,6 +45,17 @@ from ..tools import (
     request_human_handoff,
 )
 from . import rules
+
+# Intents that gate whether a human must be involved at all (`kernel.hitl`'s
+# "outside the assistant's authority" triggers). A model's own semantic read
+# has no keyword safety net the way `solicitation` always does below, so a
+# near-verbatim "I want to cancel my policy" or "speak to a human" could
+# silently fail to escalate purely because this run's model classified it
+# differently. A missed escalation is the costly failure direction here, so
+# the deterministic read wins whenever it fires — the same "the deterministic
+# marker settles it" idea `kernel/qualification.py` already applies to
+# solicitation, extended to these three intents.
+_ESCALATION_CRITICAL_INTENTS = frozenset({Intent.HUMAN_REQUEST, Intent.COMPLAINT, Intent.UNDERWRITING})
 
 
 def extract(
@@ -69,10 +81,13 @@ def extract(
     agent.tool_plain(_bind_summary_tool(trimmed), name="get_conversation_summary")
     agent.tool_plain(_bind_handoff_tool(proposal), name="request_human_handoff")
 
-    # `solicitation` is always the deterministic corroboration, model or no
-    # model (see `backend/domain/detection.py`), so it is computed once here
-    # regardless of which branch below is taken.
-    solicitation = rules.extract(text, context).solicitation
+    # The deterministic read, computed once and reused below: `solicitation`
+    # is always taken from here regardless of which branch fires (see
+    # `backend/domain/detection.py`), and on a successful model run further
+    # down it also corroborates `signals` (unioned in) and the escalation-
+    # critical intents above (rule wins when it fires).
+    rule_based = rules.extract(text, context)
+    solicitation = rule_based.solicitation
 
     # A null step keeps the happy path free of `if recorder` branches.
     step_cm = recorder.step("extraction", "llm") if recorder else nullcontext(StepHandle())
@@ -82,13 +97,11 @@ def extract(
         except UnexpectedModelBehavior as exc:
             violation = _describe_violation(exc)
             step.degrade(violation)
-            fallback = rules.extract(text, context)
-            return ExtractionOutcome(detection=fallback, source="rule", violation=violation)
+            return ExtractionOutcome(detection=rule_based, source="rule", violation=violation)
         except telemetry.UNAVAILABLE_ERRORS as exc:
             reason = telemetry.describe_unavailable(exc)
             step.degrade(reason)
-            fallback = rules.extract(text, context)
-            return ExtractionOutcome(detection=fallback, source="rule", unavailable=reason)
+            return ExtractionOutcome(detection=rule_based, source="rule", unavailable=reason)
 
         messages = result.all_messages()
         if recorder is not None:
@@ -101,10 +114,19 @@ def extract(
         output = result.output
         step.note(f"intent={output.intent.value} product={output.product.value}")
 
+    merged_signals = list(output.signals)
+    for signal in rule_based.signals:
+        if signal not in merged_signals:
+            merged_signals.append(signal)
+
+    intent = output.intent
+    if rule_based.intent in _ESCALATION_CRITICAL_INTENTS:
+        intent = rule_based.intent
+
     detection = Detection(
-        intent=output.intent,
+        intent=intent,
         product=output.product,
-        signals=list(output.signals),
+        signals=merged_signals,
         concerns=list(output.concerns),
         restricted=output.restricted,
         cancellation=output.cancellation,

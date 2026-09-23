@@ -50,19 +50,19 @@ describe('capabilities', () => {
     assert.equal(gateway.capabilities.quickReplies, false);
   });
 
-  test('the salespilot stub advertises nothing, so controls degrade rather than throw', () => {
+  test('the salespilot adapter advertises what the rebuilt backend serves', () => {
     const gateway = createSalesPilotGateway();
     assert.deepEqual(gateway.capabilities, {
-      repReply: false,
-      telemetry: false,
-      author: false,
-      quickReplies: false,
+      repReply: true,
+      telemetry: true,
+      author: true,
+      quickReplies: true,
     });
   });
 
-  test('the salespilot stub fails loudly if actually called', async () => {
-    const gateway = createSalesPilotGateway();
-    assert.throws(() => gateway.listConversations());
+  test('the salespilot adapter reports an unreachable backend rather than hanging', async () => {
+    const gateway = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:1' });
+    assert.equal(await gateway.health(), false);
   });
 });
 

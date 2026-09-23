@@ -54,6 +54,13 @@ STDLIB_ONLY = ("domain", "kernel")
 FRAMEWORK_MODULES = {"pydantic_ai", "openai"}
 FRAMEWORK_OWNER = "agent"
 
+# P5: the repository's write surface, and who may call it.
+STORAGE_WRITE_METHODS = {
+    "upsert_opportunity", "delete_opportunity", "add_case", "update_case",
+    "save_receipt", "save_run",
+}
+STORAGE_WRITERS = {"services", "storage"}
+
 
 def _python_files() -> list[Path]:
     return [
@@ -185,6 +192,31 @@ class TestImportDirection(unittest.TestCase):
                     violations.append(
                         f"{path.relative_to(BACKEND)}:{line} — {root!r} imported "
                         f"from {where!r}; only {FRAMEWORK_OWNER!r} may"
+                    )
+        self.assertEqual([], violations, "\n" + "\n".join(violations))
+
+    def test_only_services_writes_storage(self):
+        """P5 acceptance: `services/` is the only package that writes storage.
+
+        The import allowlist lets `api` import `storage` for reads, so the
+        write methods themselves are the boundary: a call to any of them
+        outside `services/` (or `storage/`'s own implementations) fails here.
+        """
+        violations = []
+        for path in _python_files():
+            package = _package_of(path)
+            if package in STORAGE_WRITERS:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in STORAGE_WRITE_METHODS
+                ):
+                    violations.append(
+                        f"{path.relative_to(BACKEND)}:{node.lineno} — "
+                        f"{node.func.attr}() called from {package or path.name!r}"
                     )
         self.assertEqual([], violations, "\n" + "\n".join(violations))
 

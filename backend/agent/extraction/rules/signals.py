@@ -12,6 +12,7 @@ the model's `genuine_enquiry` judgement.
 """
 from __future__ import annotations
 
+import unicodedata
 from typing import NamedTuple, Optional
 
 from ....domain.enums import Intent, Product, Signal
@@ -116,6 +117,27 @@ _SOLICITATION_PHRASES = (
 
 _CONTEXT_PURCHASE_HINTS = ("yes", "ok", "sure", "please", "go ahead", "right")
 
+# Common leetspeak/homoglyph digit-for-letter substitutions. A phrase match is
+# tried against both the plain-lowercased text and this de-leeted copy, so a
+# restricted-topic phrase like "discount" cannot dodge escalation by being
+# spelled "disc0unt" — escalation gates (`kernel.hitl`) must not be this easy
+# to route around with trivial obfuscation.
+_LEET_MAP = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+def _deleet(text: str) -> str:
+    return text.translate(_LEET_MAP)
+
+
+def _strip_invisible(text: str) -> str:
+    """Drop Unicode "format" characters (zero-width space/joiner, bidi
+    controls, byte-order mark, ...) that render as nothing but still break a
+    literal substring match. `"disc​ount"` reads identically to
+    "discount" to a person and to any UI, so it must match "discount" here
+    too rather than silently slipping past every restricted-topic phrase.
+    """
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
 
 class SignalObservations(NamedTuple):
     signals: list[Signal]
@@ -133,12 +155,14 @@ def detect(
     context: Optional[list[Message]] = None,
 ) -> SignalObservations:
     """Detect observable sales signals, lifecycle events, and solicitation."""
-    normalized = f" {text.lower().strip()} "
+    cleaned = _strip_invisible(text)
+    normalized = f" {cleaned.lower().strip()} "
+    deleeted = f" {_deleet(cleaned.lower().strip())} "
     signals: list[Signal] = []
     concerns: list[str] = []
 
     for signal, phrases in _SIGNAL_PHRASES:
-        if any(phrase in normalized for phrase in phrases):
+        if any(phrase in normalized or phrase in deleeted for phrase in phrases):
             signals.append(signal)
 
     # Withdrawal is a strong negative signal and overrides a co-occurring
@@ -164,7 +188,7 @@ def detect(
         context
         and Signal.PURCHASE not in signals
         and Signal.WITHDRAWAL not in signals
-        and text.lower().strip() in _CONTEXT_PURCHASE_HINTS
+        and cleaned.lower().strip() in _CONTEXT_PURCHASE_HINTS
         and _was_application_topic(context)
     ):
         signals.append(Signal.PURCHASE)
@@ -174,7 +198,7 @@ def detect(
         or Signal.COMPLIANCE_RISK in signals
         or Signal.NEGOTIATION in signals
     )
-    lowered = text.lower()
+    lowered = cleaned.lower()
     return SignalObservations(
         signals=signals,
         concerns=concerns,

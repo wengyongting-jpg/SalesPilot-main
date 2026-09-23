@@ -139,6 +139,42 @@ class KnowledgeRetriever:
             product=product,
         )
 
+    def detect_mentioned_products(self, text: str) -> list[Product]:
+        """Every product literally named in `text`, in reading order.
+
+        `agent.extraction`'s product classifier is deliberately sticky (one
+        product per opportunity, carried forward across turns) and, for a
+        message naming two products, an ordering quirk in its phrase list
+        picks only one of them. Neither is wrong for its own job, but a
+        comparison question needs both sides named, so this is a separate,
+        narrow lookup used only for `Intent.COMPARISON`.
+        """
+        normalized = text.lower()
+        hits = [(normalized.find(pid), Product(pid)) for pid in self.products if pid in normalized]
+        hits = [hit for hit in hits if hit[0] != -1]
+        hits.sort(key=lambda pair: pair[0])
+        ordered: list[Product] = []
+        for _, product in hits:
+            if product not in ordered:
+                ordered.append(product)
+        return ordered
+
+    def retrieve_comparison(self, product_a: Product, product_b: Product) -> RetrievalResult:
+        """Grounded facts for both sides of a comparison, not just one.
+
+        Without this, a "compare A and B" question was silently answered
+        about whichever single product `Detection.product` happened to
+        settle on, and the other product's facts never appeared at all.
+        """
+        facts: list[str] = []
+        for product in (product_a, product_b):
+            data = self.products.get(product.value)
+            if data is None:
+                continue
+            facts.append(f"{data['name']}: {data['positioning']}")
+            facts.append(f"{FIELD_LABELS['premium']}: {data['premium']}")
+        return RetrievalResult(facts=facts, matches=[], confidence=0.9, product=product_a)
+
     def lookup_field(self, product: Product, field: str) -> Optional[str]:
         """A single named fact about a single product, for a targeted tool call."""
         product_data = self.products.get(product.value)

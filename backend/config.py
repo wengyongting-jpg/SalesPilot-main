@@ -93,6 +93,11 @@ RETRIEVAL_CONFIDENCE_ESCALATE = 0.5
 
 API_HOST = _env("SALESPILOT_HOST", "127.0.0.1")
 API_PORT = int(_env("SALESPILOT_PORT", "8000"))
+# The backend serves no UI (docs/backend-plan.md §4 rule 7); both frontends are
+# served from their own origin, so cross-origin requests are the normal case.
+# Permissive by default because this is an unauthenticated demo; narrow it with
+# a comma-separated list for anything else.
+CORS_ORIGINS = [o.strip() for o in _env("SALESPILOT_CORS_ORIGINS", "*").split(",") if o.strip()]
 
 # ---- Compliance ----------------------------------------------------------
 # Appended verbatim whenever a reply quotes a premium. Never truncated, never
@@ -119,6 +124,7 @@ def describe() -> dict[str, object]:
         "console_trace": "on" if CONSOLE_TRACE else "off",
         "console_colour": "on" if CONSOLE_COLOUR else "off",
         "log_file": str(LOG_FILE),
+        "cors_origins": ",".join(CORS_ORIGINS),
         "knowledge_base": str(KB_PATH),
         "database": str(DEFAULT_DB_PATH),
     }

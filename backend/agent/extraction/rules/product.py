@@ -60,7 +60,17 @@ def detect(text: str, context: Optional[list[Message]] = None) -> Product:
 
 
 def _infer_from_context(context: list[Message]) -> Product:
+    """Carry forward the product the *customer* was most recently discussing.
+
+    Scans only customer messages, never the assistant's own prior replies: a
+    greeting, an overview or a comparison routinely names every product in
+    one message, so scanning it for "the" product mentioned just returns
+    whichever keyword happens to be checked first — regardless of what the
+    customer actually meant, or whether they'd named a product at all.
+    """
     for msg in reversed(context):
+        if not msg.is_from_customer:
+            continue
         text = msg.text.lower()
         for keyword, product in _PRODUCT_KEYWORDS.items():
             if keyword in text:

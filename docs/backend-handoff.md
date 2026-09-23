@@ -2,7 +2,15 @@
 
 **To:** the agent or developer owning the Python backend
 **From:** the frontend track
-**Status:** customer chat partly built (mock transport); admin console next
+**Status (2026-09-22):** superseded in part. The `backend/` rebuild is complete
+through P7 and serves `docs/api/interface-v1.md` §5, which is now **frozen**.
+Both frontends' real adapters are written against it
+(`frontend/*/js/gateway/salespilot.js`) and verified against a running server,
+though neither app has yet been opened in a browser against live data. The
+ownership table in §1 is retained as history: per `AGENTS.md` §4 the tracks are
+no longer read-only to each other, since only one operator now directs the
+repository. Everything below still describes *why* each request was made,
+which is the part worth keeping.
 
 > **Updated 2026-09-22.** Two things changed since this document was written.
 >

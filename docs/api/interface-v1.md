@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | **Version** | v1 |
-| **Status** | `draft` — both tracks may edit directly |
+| **Status** | `frozen` 2026-09-22 — no edit is permitted; create `interface-v2.md` and point it here |
 | **Ownership** | **Shared.** Backend and frontend both edit this file. |
 | **Supersedes** | `docs/backend-contract.md` Part A (the schema reference) |
 | **Companions** | `docs/backend-contract.md` (gap register) · `docs/backend-handoff.md` (ownership and coordination) |
@@ -412,8 +412,12 @@ transport-level failure with a generic user-facing message.
 
 ## 5. Proposed changes
 
-`PROPOSED` — not implemented. Each item has a corresponding entry in
-`docs/backend-contract.md` carrying the test and acceptance criteria.
+`CURRENT` as of 2026-09-22 — **every section below is implemented and served by
+`backend/`**, and verified against it by the suite in `backend/tests/`. The
+heading keeps its original name so the change-log and cross-references still
+resolve. Each item has a corresponding entry in `docs/backend-contract.md`
+carrying the test and acceptance criteria; that file's status table now reads
+`Shipped` for all thirteen.
 
 ### 5.1 Tier separation by namespace
 
@@ -632,3 +636,4 @@ How each frontend behaves while §5 is outstanding. No frontend work is blocked.
 | 2026-09-22 | backend | **Renamed `role: "agent"` to `role: "business"`** (§1.2, §5.8). The old value implied "AI agent", so a human representative's message under it read as a contradiction — the same one-field-two-meanings defect §1 exists to prevent. Done now because the cost is near zero: neither real adapter is written, no view code branches on the wire value, and the only shipped occurrences are admin mock fixtures. No transitional alias. |
 | 2026-09-22 | backend | `salespilot/` is frozen and will be discarded once the rebuild lands. §4 therefore describes the frozen build; the authoritative target for both adapters is §5. |
 | 2026-09-22 | backend | Raised two gaps in `backend-contract.md` rather than specifying them here yet, since both need a shape agreed with the frontend: **item 12**, an incremental cursor for the admin conversation read — §5.6 covers only the customer surface, while the admin side polls the full profile and is the one that grows quadratically over a session; **item 13**, two-axis scoring with a qualification gate, adding admin-tier `fit`, `behaviour` and `qualification` fields. `priority` keeps exactly its three existing values in both cases; only its derivation changes, so badge and count logic is unaffected. |
+| 2026-09-22 | backend | **Status set to `frozen`.** Every §5 proposal is implemented and served by `backend/` (plan §9, phases P0–P7); §5's `PROPOSED` marker is now `CURRENT` and `backend-contract.md` reads `Shipped` for all thirteen items. §4 remains as the historical record of the frozen `salespilot/` build. Two clarifications the implementation forced, both narrowing rather than changing the contract: an offline conversation reports `status: "degraded"` on the agent run even when offline is the *configured* mode and not a failure (§5.7), since a run that never reached a model did not run at full capability; and `tool_calls` is now populated by model-selected calls, which §1.1 rule 2 always anticipated — retrieval remains `kind: "retrieval"` and is still never counted as one. Further changes require `interface-v2.md` pointing back at this file. §6's degradation matrix is retained as written: it describes how each frontend behaves while its real adapter is unwritten, which is still the case for both. |

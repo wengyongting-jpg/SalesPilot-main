@@ -890,31 +890,35 @@ enable.
 | Date | Item | Priority | Status |
 | --- | --- | --- | --- |
 | 2026-09-22 | 1. Message idempotency | P0 | **Shipped** |
-| — | 2. Quick replies | P1 | Not started |
-| — | 3. Incremental fetch | P2 | Not started |
-| — | 4. Rep reply | **P0** (raised) | Not started |
-| — | 5. Message id / status | P3 | Not started |
-| — | 6. Visibility tiers | P0 | Not started |
-| — | 7. `author` field | P1 | Not started |
-| — | 8. Agent run telemetry | P1 | Not started |
-| — | 9. Rename `turns` | P2 | Not started |
-| — | 10. `generation` field | P1 | Modelled, not yet on the wire |
-| — | 11. `role` rename to `business` | P1 | Modelled, not yet on the wire |
-| — | 12. Admin incremental read | P2 | Not started |
-| — | 13. Two-axis scoring + qualification gate | P1 | Decided, not yet on the wire |
+| 2026-09-22 | 2. Quick replies | P1 | **Shipped** |
+| 2026-09-22 | 3. Incremental fetch | P2 | **Shipped** — as `GET /api/conversations/{id}?since=` (interface §5.6) |
+| 2026-09-22 | 4. Rep reply | **P0** (raised) | **Shipped** |
+| 2026-09-22 | 5. Message id / status | P3 | **Shipped** |
+| 2026-09-22 | 6. Visibility tiers | P0 | **Shipped** |
+| 2026-09-22 | 7. `author` field | P1 | **Shipped** |
+| 2026-09-22 | 8. Agent run telemetry | P1 | **Shipped** — `tool_calls` is now populated, not empty (AC 3 superseded by the real loop) |
+| 2026-09-22 | 9. Rename `turns` | P2 | **Shipped** — both names on the wire, `customer_message_count` authoritative |
+| 2026-09-22 | 10. `generation` field | P1 | **Shipped** |
+| 2026-09-22 | 11. `role` rename to `business` | P1 | **Shipped** |
+| 2026-09-22 | 12. Admin incremental read | P2 | **Shipped** — `?since=` and `?history_limit=` on the admin read |
+| 2026-09-22 | 13. Two-axis scoring + qualification gate | P1 | **Shipped** — admin-tier `fit`, `behaviour`, `qualification`; `held` list and disqualify/release actions |
 
-**Reading "not yet on the wire".** The rebuild is being built in phases
-(`docs/backend-plan.md` §9) and its HTTP surface arrives in the last two. Items 10,
-11 and 13 exist in the rebuild's domain model and deterministic kernel as of
-2026-09-22 and behave as specified there, but **no endpoint serves them yet**, so a
-frontend adapter must still treat them as absent. Only `Shipped` means an adapter can
-rely on a field arriving. The status here will become `Shipped` when the endpoint
-does.
+**All thirteen items are on the wire**, served by `backend/` as of 2026-09-22
+(`docs/backend-plan.md` §9, phases P0–P7). Adapters may rely on every field above.
+Two notes where the implementation differs from the criteria as written:
 
-Progress for the curious, not for integration: `backend/` has `domain/` and
-`kernel/` complete with 101 tests. Item 13's measured effect — advertising spam now
-held and absent from the queue, where it previously scored 96 and outranked a genuine
-customer at 82 — is recorded in `docs/backend-plan.md` §9 under P2.
+- **Item 8, AC 3** required `tool_calls` to stay empty and `tool_call_count` to be
+  zero. That criterion was written before a tool-calling loop existed; the loop
+  arrived in P3, so model-selected calls are now counted there. Retrieval is still
+  `kind: "retrieval"` and still never counted as a tool call, which is what the
+  criterion was actually protecting.
+- **Item 10, AC 2** required an offline conversation to report a `degraded` agent
+  run. It does — including when offline is the *configured* mode rather than a
+  failure, since a run that never reached a model did not run at full capability.
+
+Item 13's measured effect — advertising spam now held and absent from the queue,
+where it previously scored 96 and outranked a genuine customer at 82 — is recorded
+in `docs/backend-plan.md` §9 under P2.
 
 **Where items 2-11 will be implemented.** In `backend/`, the rebuild. **`salespilot/`
 is frozen as of 2026-09-22 and will be discarded once the rebuild lands** — it

@@ -1,0 +1,469 @@
+{
+  "eval_suite": "caresure-conversation-behavioural-evals",
+  "version": "1.0",
+  "generated": "2026-09-23",
+  "purpose": "Portable, black-box behavioural scenarios for CareSure's customer chat pipeline. Written against the frozen customer HTTP contract (docs/api/interface-v1.md) so they can be replayed against this backend or a different implementation of the same contract for parity/regression checking.",
+  "target_contract": {
+    "protocol": "HTTP",
+    "endpoint": "POST /api/messages",
+    "spec_ref": "docs/api/interface-v1.md §5.1",
+    "request_shape": {
+      "customer_id": "string, default \"\" (empty creates a new opportunity)",
+      "customer_name": "string, required, min length 1",
+      "text": "string, required, min length 1",
+      "client_message_id": "string, optional (idempotency key)"
+    },
+    "response_shape": {
+      "reply": "string",
+      "generation": "\"llm\" | \"template\" | \"human\" | null",
+      "product": "string | null — one of essential, family, plus, corporate, unknown",
+      "facts": "string[]",
+      "quick_replies": "[{id: string, label: string}]",
+      "client_message_id": "string | null",
+      "human_takeover": "boolean"
+    },
+    "notes": [
+      "A scenario's turns share one customer_id (the same conversation); the first turn may send customer_id: \"\" and capture the id the backend assigns for use on later turns.",
+      "Fields NOT in response_shape (opportunity state, score, signals, priority, next_best_action, case, retrieval confidence, telemetry) must never appear on this endpoint by design — see global_invariants."
+    ]
+  },
+  "global_invariants": [
+    {
+      "id": "no-internal-vocabulary-leak",
+      "description": "The customer-facing `reply` must never contain an internal state, signal, or priority-band value verbatim — the concrete defect this rebuild's `assert_customer_safe`/`assert_reply_safe` exist to catch (see backend/agent/policy.py).",
+      "applies_to": "every scenario's every turn, field: response.reply",
+      "check": "reply_excludes_all",
+      "values": [
+        "Cold Lead", "Potential Interest", "Evaluation & Hesitation", "High Intent",
+        "Closed / Active Customer", "Dormant / Lost",
+        "Purchase Preparation", "Expansion: Family", "Expansion: Corporate",
+        "Human Request", "Compliance Risk", "Negotiation", "Conversion", "Withdrawal",
+        "HITL", "next best action"
+      ]
+    },
+    {
+      "id": "quick-replies-bounded",
+      "description": "docs/api/interface-v1.md §5.5 contract.",
+      "applies_to": "every scenario's every turn, field: response.quick_replies",
+      "check": "count <= 3 and every label.length <= 24"
+    },
+    {
+      "id": "premium-figure-implies-disclaimer",
+      "description": "Any reply quoting a premium must carry the demo disclaimer verbatim, never truncated or hidden (.kiro/steering/product.md compliance red line). Scoped to premium specifically, not any dollar figure: a coverage limit or deductible (also a 'S$...' figure) does not require this disclaimer by design, only a premium quote does.",
+      "applies_to": "every scenario's every turn, field: response.reply",
+      "check": "if reply (case-insensitively) contains 'premium' and matches /S\\$\\s?[\\d,]+/ then reply_contains",
+      "value": "All premiums are fictional indicative rates for the SalesPilot demo and do not represent actual insurance quotations. Final premiums are subject to age, underwriting, plan selection and insurer assessment."
+    },
+    {
+      "id": "no-agent-role",
+      "description": "docs/api/interface-v1.md: role is customer|business only, never a legacy \"agent\" value, on any endpoint.",
+      "applies_to": "every scenario, any transcript read",
+      "check": "no field named role has value \"agent\" anywhere in the response"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "baseline-greeting",
+      "category": "baseline",
+      "description": "First message, nothing specific asked yet, should greet and ask which plan interests them rather than dumping the full catalogue.",
+      "turns": [
+        {
+          "send": { "text": "hi" },
+          "expect": {
+            "human_takeover": false,
+            "reply_contains_any": ["Essential", "Family", "Plus", "Corporate"],
+            "quick_replies_count_between": [1, 3]
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-price-essential",
+      "category": "baseline",
+      "description": "A direct price question about a named product should return grounded premium facts with the disclaimer.",
+      "turns": [
+        {
+          "send": { "text": "How much is Essential?" },
+          "expect": {
+            "human_takeover": false,
+            "product": "essential",
+            "reply_contains_any": ["S$", "premium"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-claims-question",
+      "category": "baseline",
+      "description": "A how-to-claim question should be answered directly, not escalated. Uses 'the Essential plan' rather than 'Family plan' deliberately: naming the Family product here would itself match a family_need intent phrase before the claims phrase is checked, so the question would be misclassified before it ever reached this test's actual point.",
+      "turns": [
+        {
+          "send": { "text": "How do I submit a claim for the Essential plan?" },
+          "expect": {
+            "human_takeover": false,
+            "product": "essential",
+            "reply_contains_any": ["claim", "Claim"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-eligibility-question",
+      "category": "baseline",
+      "description": "A basic eligibility question is answered directly.",
+      "turns": [
+        {
+          "send": { "text": "Am I eligible for the Plus plan as a PR?" },
+          "expect": {
+            "human_takeover": false,
+            "product": "plus"
+          }
+        }
+      ]
+    },
+    {
+      "id": "baseline-corporate-browsing-no-escalation",
+      "category": "baseline",
+      "description": "Corporate curiosity with no purchase-readiness signal should be answered, not escalated — escalation is for a ready-to-buy corporate lead (see escalation-corporate-ready-to-sign), not every corporate question.",
+      "turns": [
+        {
+          "send": { "text": "Do you have a plan for a small company with 15 staff?" },
+          "expect": {
+            "human_takeover": false,
+            "product": "corporate"
+          }
+        }
+      ]
+    },
+    {
+      "id": "escalation-human-request",
+      "category": "escalation",
+      "description": "An explicit request for a person must always hand over, regardless of anything else in the message.",
+      "turns": [
+        {
+          "send": { "text": "Can I talk to a real person please" },
+          "expect": {
+            "human_takeover": true,
+            "quick_replies_count_between": [0, 0]
+          }
+        }
+      ]
+    },
+    {
+      "id": "escalation-complaint",
+      "category": "escalation",
+      "description": "A complaint is outside the assistant's authority and must escalate.",
+      "turns": [
+        {
+          "send": { "text": "I am extremely unhappy, my claim was rejected and I want to file a complaint" },
+          "expect": { "human_takeover": true }
+        }
+      ]
+    },
+    {
+      "id": "escalation-underwriting-medical",
+      "category": "escalation",
+      "description": "A personalised medical/underwriting question must escalate rather than being answered generically.",
+      "turns": [
+        {
+          "send": { "text": "I was diagnosed with diabetes last year, will you cover me?" },
+          "expect": { "human_takeover": true }
+        }
+      ]
+    },
+    {
+      "id": "escalation-negotiation-discount-plain",
+      "category": "escalation",
+      "description": "An explicit discount/price-match request is a negotiation and must escalate, never be auto-answered. Control case for regression-negotiation-obfuscation-evasion.",
+      "turns": [
+        {
+          "send": { "text": "Can you give me a discount on this plan?" },
+          "expect": { "human_takeover": true }
+        }
+      ]
+    },
+    {
+      "id": "escalation-competitive-at-high-intent",
+      "category": "escalation",
+      "description": "A competitor mention alone must NOT escalate (P0-2), but the same signal once the customer has reached high purchase intent must (P0-3-adjacent sales trigger).",
+      "turns": [
+        {
+          "send": { "text": "I want to apply for the Plus plan" },
+          "expect": { "human_takeover": false, "product": "plus" }
+        },
+        {
+          "send": { "text": "how do I apply, what documents do I need" },
+          "expect": { "human_takeover": false }
+        },
+        {
+          "send": { "text": "actually a competitor is offering a better deal, should I switch?" },
+          "expect": { "human_takeover": true }
+        }
+      ]
+    },
+    {
+      "id": "escalation-corporate-ready-to-sign",
+      "category": "escalation",
+      "regression_for": "corporate-quote-not-escalated",
+      "description": "A ready-to-buy corporate lead must be escalated for a human-handled quotation, never auto-answered with a self-serve FAQ. Found via eval: the message's 'sign up' phrasing classified as an application intent rather than a corporate-need intent, which fell outside the corporate-quote escalation gate entirely.",
+      "turns": [
+        {
+          "send": { "text": "We have 500 employees, need a quote now, I'm ready to sign up" },
+          "expect": {
+            "human_takeover": true,
+            "product": "corporate"
+          }
+        }
+      ]
+    },
+    {
+      "id": "adversarial-empty-message-rejected",
+      "category": "adversarial",
+      "description": "The request schema requires non-empty text; an empty string must be rejected at validation, not silently treated as a greeting.",
+      "turns": [
+        {
+          "send": { "text": "" },
+          "expect": { "status_code": 422 }
+        }
+      ]
+    },
+    {
+      "id": "adversarial-whitespace-only-message",
+      "category": "adversarial",
+      "description": "Whitespace passes length validation (length > 0) and should be handled as a no-content message, not crash.",
+      "turns": [
+        {
+          "send": { "text": "     " },
+          "expect": { "status_code": 200, "human_takeover": false }
+        }
+      ]
+    },
+    {
+      "id": "adversarial-sql-injection-payload",
+      "category": "adversarial",
+      "description": "A SQL-injection-shaped payload is just message text; it must be stored/answered safely, never executed or crash the request.",
+      "turns": [
+        {
+          "send": { "text": "'; DROP TABLE opportunities; --" },
+          "expect": { "status_code": 200 }
+        }
+      ]
+    },
+    {
+      "id": "adversarial-xss-payload",
+      "category": "adversarial",
+      "description": "An XSS-shaped payload must not crash the backend. (Rendering safety is a frontend concern, checked separately — this only covers the API.)",
+      "turns": [
+        {
+          "send": { "text": "<script>alert(document.cookie)</script> how much is the family plan?" },
+          "expect": { "status_code": 200, "product": "family" }
+        }
+      ]
+    },
+    {
+      "id": "adversarial-extremely-long-message",
+      "category": "adversarial",
+      "description": "A very large message (~12KB) must not crash or hang the request.",
+      "turns": [
+        {
+          "send": { "text_repeat": { "text": "I am concerned about coverage. ", "times": 400 } },
+          "expect": { "status_code": 200 }
+        }
+      ]
+    },
+    {
+      "id": "adversarial-emoji-and-mixed-language",
+      "category": "adversarial",
+      "description": "Emoji flooding plus non-English text must not crash; an English-keyword-only backend is expected to fall back gracefully (e.g. to a greeting) rather than error.",
+      "turns": [
+        {
+          "send": { "text": "🏥💰😡😡😡 REFUND NOW!!! 家庭保险多少钱? 这个便宜吗" },
+          "expect": { "status_code": 200 }
+        }
+      ]
+    },
+    {
+      "id": "regression-negotiation-obfuscation-evasion",
+      "category": "regression",
+      "regression_for": "negotiation-leetspeak-evasion",
+      "description": "Trivial leetspeak/homoglyph obfuscation of a discount request must not evade the negotiation-escalation gate. Found via eval: 'disc0unt' / 'pl@n' produced zero signals and was auto-answered, while the unobfuscated control correctly escalated.",
+      "turns": [
+        {
+          "send": { "text": "can you give me a disc0unt on this pl@n please" },
+          "expect": { "human_takeover": true }
+        }
+      ]
+    },
+    {
+      "id": "regression-comparison-grounds-both-products",
+      "category": "regression",
+      "regression_for": "dead-comparison-intent",
+      "description": "A two-product comparison question must ground facts for BOTH named products. Found via eval: product detection is a single sticky field, and a phrase-list ordering quirk made 'Plus and Essential' resolve to Essential only, silently dropping Plus from the answer entirely.",
+      "turns": [
+        {
+          "send": { "text": "What's the difference between Plus and Essential?" },
+          "expect": {
+            "human_takeover": false,
+            "reply_contains_all": ["Essential", "Plus"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "regression-withdrawal-then-reengagement-restores-quick-replies",
+      "category": "regression",
+      "regression_for": "sticky-withdrawal-signal",
+      "description": "After a withdrawal, a customer who re-engages must get ordinary answers AND quick replies back, not have them permanently suppressed. Found via eval: the withdrawal signal was never cleared from the stored profile, so quick_replies stayed empty on every later turn even after a full, normal re-engagement.",
+      "turns": [
+        {
+          "send": { "text": "I don't want to buy anymore" },
+          "expect": { "human_takeover": false, "reply_contains_any": ["no problem", "respect your decision"] }
+        },
+        {
+          "send": { "text": "actually wait, tell me about essential" },
+          "expect": {
+            "human_takeover": false,
+            "product": "essential",
+            "quick_replies_count_between": [1, 3]
+          }
+        },
+        {
+          "send": { "text": "how much is the premium" },
+          "expect": {
+            "quick_replies_count_between": [1, 3]
+          }
+        }
+      ]
+    },
+    {
+      "id": "lifecycle-application-through-conversion-cancellation-and-expansion",
+      "category": "lifecycle",
+      "description": "A full customer lifecycle in one conversation: applying, converting to an active customer, then a cancellation attempt (which is both a complaint AND a churn-risk flag on the same message) and an expansion signal afterward. Turn 4's human_takeover stays true not because the newborn/family message itself escalates anything, but because turn 3's complaint already opened a case that is still open — escalation is sticky until a human resolves it, which this scenario's admin_check on turn 3 and turn 4 both confirm.",
+      "turns": [
+        {
+          "send": { "text": "I want to apply for the essential plan" },
+          "expect": { "human_takeover": false, "product": "essential" }
+        },
+        {
+          "send": { "text": "I've completed my payment for the essential plan" },
+          "expect": { "human_takeover": false },
+          "admin_check": { "expect": { "state": "Closed / Active Customer", "qualification": "qualified" } }
+        },
+        {
+          "send": { "text": "I want to cancel my policy" },
+          "expect": { "human_takeover": true },
+          "admin_check": { "expect": { "state": "Closed / Active Customer", "churn_risk": true } }
+        },
+        {
+          "send": { "text": "we just had a newborn, can I add my child to the family plan" },
+          "expect": { "human_takeover": true },
+          "admin_check": { "expect": { "expansion_contains": "Family" } }
+        }
+      ]
+    },
+    {
+      "id": "lifecycle-postponement-moves-evaluation-to-dormant",
+      "category": "lifecycle",
+      "description": "Two factual questions move the customer into evaluation, and an explicit 'need time to think it over' postpones the decision — the state machine should treat this as dormant, not as hesitation to keep nurturing indefinitely, and it must not be misread as a negotiation or complaint.",
+      "turns": [
+        { "send": { "text": "How much is the Essential plan?" }, "expect": { "human_takeover": false } },
+        { "send": { "text": "How much is the deductible?" }, "expect": { "human_takeover": false } },
+        {
+          "send": { "text": "I need some time to think about it" },
+          "expect": { "human_takeover": false },
+          "admin_check": { "expect": { "state": "Dormant / Lost" } }
+        }
+      ]
+    },
+    {
+      "id": "isolation-two-customers-do-not-cross-contaminate",
+      "category": "isolation",
+      "description": "One customer's escalation must never leak into a completely different customer's conversation. Uses two actors sharing one scenario, each with their own customer_id.",
+      "turns": [
+        {
+          "send": { "as": "A", "text": "I am extremely unhappy, my claim was rejected and I want to file a complaint" },
+          "expect": { "human_takeover": true }
+        },
+        {
+          "send": { "as": "B", "text": "How much is the Plus plan?" },
+          "expect": { "human_takeover": false, "product": "plus" }
+        }
+      ]
+    },
+    {
+      "id": "robustness-all-caps-message",
+      "category": "adversarial",
+      "description": "Shouted, all-caps input should be handled identically to normal casing.",
+      "turns": [
+        {
+          "send": { "text": "HOW MUCH DOES ESSENTIAL COST??" },
+          "expect": { "human_takeover": false, "product": "essential" }
+        }
+      ]
+    },
+    {
+      "id": "robustness-repeated-message-without-key-is-not-deduped",
+      "category": "adversarial",
+      "description": "Sending the same text three times with no client_message_id is three distinct turns, not an accidental dedup — idempotency only applies when the caller supplies a key.",
+      "turns": [
+        { "send": { "text": "How much is Essential?" }, "expect": { "human_takeover": false } },
+        { "send": { "text": "How much is Essential?" }, "expect": { "human_takeover": false } },
+        {
+          "send": { "text": "How much is Essential?" },
+          "expect": { "human_takeover": false },
+          "admin_check": { "expect": {} }
+        }
+      ]
+    },
+    {
+      "id": "regression-two-strikes-required-before-a-solicitation-hold",
+      "category": "regression",
+      "regression_for": "solicitation-strike-count-double-counted",
+      "description": "Fixed — was an open finding. kernel/qualification.py's own docstring states two independent soliciting messages are required before a conversation is held ('a single misjudged message must not remove a real customer from the queue'), but services/conversation.py incremented opp.solicitation_count *before* calling qualification.assess(), and assess() added another +1 on top for the current message, double-counting it and collapsing the two-strike design into one strike. Fixed by incrementing only after the verdict is read. Turn 1's qualification is deliberately NOT asserted here: the offline rules peer always reports genuine_enquiry=True, so it stays 'qualified' until the second strike accumulates — but a configured model may correctly judge a blatantly promotional message as not a genuine enquiry on its own, which legitimately holds it after just one message via kernel/qualification.py's separate 'blatant case' rule (the semantic judgement and the deterministic marker agreeing is a different, intentional one-strike path). Both outcomes are correct; only 'held by the second solicitation message at the latest' is asserted.",
+      "turns": [
+        {
+          "send": { "text": "Check out our exclusive deal for you, limited time offer!" },
+          "expect": { "human_takeover": false }
+        },
+        {
+          "send": { "text": "Click here to grow your business, act now!" },
+          "admin_check": { "expect": { "qualification": "held" } }
+        }
+      ]
+    },
+    {
+      "id": "regression-zero-width-space-no-longer-evades-negotiation",
+      "category": "regression",
+      "regression_for": "negotiation-leetspeak-evasion",
+      "description": "Fixed — a follow-on to the leetspeak/homoglyph fix. A zero-width space character (U+200B) inserted inside a restricted keyword ('disc​ount') is not a digit/letter substitution, so the de-leeting normalisation added for the leetspeak fix did not catch it and the phrase match failed silently. Fixed by stripping Unicode format characters (category Cf) before matching.",
+      "turns": [
+        {
+          "send": { "text": "can you give me a disc​ount on this plan" },
+          "expect": { "human_takeover": true }
+        }
+      ]
+    },
+    {
+      "id": "regression-ambiguous-followup-after-greeting-stays-unknown",
+      "category": "regression",
+      "regression_for": "greeting-text-scanned-as-product-mention",
+      "description": "Fixed — was an open finding. An ambiguous one-word follow-up right after the assistant's own greeting had its product inferred by scanning the ASSISTANT's own prior message text for product keywords; because the greeting lists 'Essential, Family, Plus or Corporate' and 'plus' was checked first, any ambiguous reply resolved to Plus regardless of what the customer meant. Fixed by scanning only the customer's own prior messages for a product mention.",
+      "turns": [
+        { "send": { "text": "hi" }, "expect": { "human_takeover": false } },
+        {
+          "send": { "text": "hmm" },
+          "expect": { "product": "unknown" }
+        }
+      ]
+    }
+  ],
+  "manual_or_white_box_checks": [
+    {
+      "id": "model-safety-check-degrades-not-crashes",
+      "regression_for": "reply-safety-check-crashed-on-ordinary-words",
+      "description": "Not expressible as a black-box HTTP fixture because it depends on what a live/configured model chooses to say, not on the input text. When a model is configured: (1) a reply that naturally uses ordinary words like 'priority' or 'escalate' must be delivered unchanged (generation=llm), and (2) a reply that genuinely echoes an internal vocabulary token (e.g. the literal phrase 'Cold Lead') must silently degrade to the deterministic template reply (generation=template) rather than raising an unhandled error and losing the turn entirely.",
+      "how_to_check": "Wire a scriptable/mock model (e.g. a function-based test double) that returns fixed text, send one customer message, and assert the response is still 200 with a non-empty reply in both cases above.",
+      "backend_reference": "backend/agent/reply/model_based.py, backend/agent/policy.py (assert_reply_safe)"
+    }
+  ]
+}

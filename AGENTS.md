@@ -171,12 +171,18 @@ These are not new rules. They are existing constraints an agent will hit
 immediately, collected here so they are impossible to miss. Each is specified in
 full in the document named.
 
-- **Backend is read-only for frontend work.** Frontend tracks do not modify
-  `salespilot/`, `tests/`, `run.py`, or `requirements.txt`. Needed backend
-  changes are recorded in `docs/backend-contract.md` instead, and the frontend
-  degrades rather than blocking. See `.kiro/steering/tech.md`.
-- **Frontend is read-only for backend work.** The reciprocal rule. See
-  `docs/backend-handoff.md`.
+- **Track ownership is advisory, not a wall** *(amended 2026-09-22 on the
+  owner's explicit instruction; previously the two tracks were read-only to
+  each other)*. That rule existed because two tracks worked the repository in
+  parallel and neither could be allowed to move the other's ground mid-flight.
+  They no longer do. One operator now directs the whole repository, so an
+  agent may change any track it is asked to change. What survives from the old
+  rule is the part that was never about parallelism: **say which track you are
+  touching and why before you touch it**, and keep a change that crosses a
+  track boundary in its own reviewable step rather than smuggled into another.
+- **`docs/api/interface-v1.md` is frozen** (2026-09-22). No edit is permitted.
+  A contract change means creating `interface-v2.md` and pointing it back at
+  v1. `docs/backend-contract.md` remains the gap register.
 - **The legacy console `salespilot/static/` is frozen.** Neither track extends,
   migrates, or refactors it.
 - **No frontend build step and no dependencies.** Vanilla HTML, CSS and ES

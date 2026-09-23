@@ -39,6 +39,51 @@ try {
   console.error('[customer-chat] transport unavailable:', error.message);
 }
 
+// ---- Polling (requirement 8.7: only while a human owns the conversation) --
+//
+// There is no push channel, so a representative's reply is only visible once
+// this device asks for it. Polling the full transcript on every tick would
+// work but re-sends everything already rendered; `fetchSince` plus a tracked
+// cursor asks for only what is new. The cursor is the last message *id* seen
+// from the gateway, not from `sendRequested`'s locally-created bubble, which
+// has no id until a real message arrives to replace it.
+
+let pollTimer = null;
+let lastMessageId = null;
+let underTakeover = false;
+
+function trackCursor(messages) {
+  for (const message of messages) {
+    if (message.id) lastMessageId = message.id;
+  }
+}
+
+async function pollOnce() {
+  if (!gateway) return;
+  try {
+    const { messages = [] } = await gateway.fetchSince(customerId, lastMessageId ?? undefined);
+    if (messages.length === 0) return;
+    trackCursor(messages);
+    store.replyReceived(messages);
+  } catch (error) {
+    // A missed tick is not fatal: the next one retries, and the customer's
+    // own next send() reconciles `humanTakeover` regardless.
+    console.error('[customer-chat] poll failed:', error);
+  }
+}
+
+function startPolling() {
+  if (pollTimer) return;
+  pollOnce(); // don't wait a full interval to notice a reply already sitting there
+  pollTimer = setInterval(pollOnce, config.pollIntervalMs);
+}
+
+function stopPolling() {
+  if (!pollTimer) return;
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
 // ---- Actions ---------------------------------------------------------------
 
 async function loadHistory() {
@@ -51,6 +96,7 @@ async function loadHistory() {
     const { messages = [], humanTakeover = false } =
       await gateway.loadHistory(customerId);
     store.historyLoaded(messages);
+    trackCursor(messages);
     if (humanTakeover) store.takeoverChanged(true);
     messageList.scrollToBottom();
   } catch (error) {
@@ -92,6 +138,7 @@ async function send(text, retryClientId) {
 
     if (result?.capabilities) store.capabilitiesDetected(result.capabilities);
 
+    trackCursor(result?.messages ?? []);
     store.replyReceived(result?.messages ?? []);
     store.markRead(message.clientId);
 
@@ -123,6 +170,7 @@ async function reset() {
       console.error('[customer-chat] reset failed:', error);
     }
   }
+  lastMessageId = null;
   store.conversationReset();
   composer.focus();
 }
@@ -174,6 +222,12 @@ const views = [header, banner, messageList, jumpToLatest, composer];
 store.subscribe((state) => {
   for (const view of views) view.render(state);
   reportState(state);
+
+  if (state.assistant.humanTakeover !== underTakeover) {
+    underTakeover = state.assistant.humanTakeover;
+    if (underTakeover) startPolling();
+    else stopPolling();
+  }
 });
 
 // ---- Harness integration (inert unless embedded) ----------------------------

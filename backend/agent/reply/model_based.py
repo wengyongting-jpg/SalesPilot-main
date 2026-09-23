@@ -13,15 +13,22 @@ When the model is unavailable the template peer takes the turn and the run
 record says so (`generation="template"`, step `degraded`) — the offline
 outcome `interface-v1.md` §5.7 describes, never a silent substitution.
 
-`message_history` continues the conversation the extraction step ran
-(`docs/backend-plan.md` §3's "one continuous conversation"): pass
-`ExtractionOutcome.trace`. Optional, so this module is independently callable.
+`customer_message` is the customer's own raw text for this turn, included
+verbatim in the prompt so the model can see exactly how the question was
+phrased. An earlier version continued the *extraction* agent's own
+conversation here instead (`ExtractionOutcome.trace`, via pydantic-ai's
+`message_history`) — but that agent's trace is full of tool-call/tool-result
+content blocks, and this agent registers no tools of its own, which at least
+one OpenAI-compatible gateway (Bedrock-backed) rejects outright: "toolConfig
+field must be defined when using toolUse and toolResult content blocks." The
+only information that history was actually carrying for this agent's purposes
+was the customer's own words, so that is now passed directly instead.
 """
 from __future__ import annotations
 
 from contextlib import nullcontext
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
@@ -43,20 +50,28 @@ def compose(
     *,
     model: Model,
     recorder: Optional[RunRecorder] = None,
-    message_history: Optional[list[Any]] = None,
+    greeting: bool = False,
+    customer_message: Optional[str] = None,
 ) -> Message:
-    prompt = _build_user_prompt(instruction, retrieval)
-    policy.assert_customer_safe(prompt)
+    developer_prompt = _build_user_prompt(instruction, retrieval)
+    # Checked before the customer's own words are appended: this is the
+    # generous, developer/KB-vocabulary check (`policy.assert_customer_safe`),
+    # and a customer is free to type any of those ordinary words themselves
+    # without that being a leak of anything.
+    policy.assert_customer_safe(developer_prompt)
+    prompt = developer_prompt
+    if customer_message:
+        prompt += f"\n\nThe customer's message: {customer_message}"
 
     agent = Agent(model, system_prompt=policy.REPLY_SYSTEM_PROMPT, retries=1)
 
     step_cm = recorder.step(STEP_NAME, "llm") if recorder else nullcontext(StepHandle())
     with step_cm as step:
         try:
-            result = agent.run_sync(prompt, message_history=message_history)
+            result = agent.run_sync(prompt)
         except telemetry.UNAVAILABLE_ERRORS as exc:
             step.degrade(telemetry.describe_unavailable(exc))
-            return template.compose(retrieval=retrieval, recorder=recorder)
+            return template.compose(retrieval=retrieval, greeting=greeting, recorder=recorder)
         if recorder is not None:
             telemetry.record_trace(
                 recorder,
@@ -64,15 +79,32 @@ def compose(
                 purpose=STEP_NAME,
                 finished_at=datetime.now(timezone.utc),
             )
+        try:
+            policy.assert_reply_safe(result.output)
+        except ValueError as exc:
+            # A genuine leak must never reach the customer, but it also must
+            # not crash the turn — degrade to the safe template peer instead,
+            # the same outcome as an unavailable model.
+            step.degrade(str(exc))
+            return template.compose(retrieval=retrieval, greeting=greeting, recorder=recorder)
         step.note(f"chars={len(result.output)}")
 
-    policy.assert_customer_safe(result.output)
-    return Message.from_ai(result.output, generation=Generation.LLM)
+    output = result.output
+    if retrieval.mentions_premium and config.DEMO_DISCLAIMER not in output:
+        # The prompt already asks the model to append this verbatim, but that
+        # is an instruction, not a guarantee: a compliance red line
+        # (`.kiro/steering/product.md` — never hidden or truncated) cannot
+        # depend on a model reliably reproducing exact text across every
+        # generation. Enforced here the same way the template peer always
+        # has, so the property holds regardless of which peer answered.
+        output = f"{output}\n\n{config.DEMO_DISCLAIMER}"
+
+    return Message.from_ai(output, generation=Generation.LLM)
 
 
 def _build_user_prompt(instruction: str, retrieval: RetrievalResult) -> str:
     lines = [instruction, "", "Approved facts:"]
     lines.extend(f"- {fact}" for fact in retrieval.facts[:4])
-    if any("premium" in fact.lower() for fact in retrieval.facts):
+    if retrieval.mentions_premium:
         lines.append(f"Disclaimer to append verbatim if a premium is shown: {config.DEMO_DISCLAIMER}")
     return "\n".join(lines)

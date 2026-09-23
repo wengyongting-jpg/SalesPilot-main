@@ -23,14 +23,6 @@
           "q": "Can I use it for private hospitals?",
           "a": "Essential is designed around B1-level public-hospital coverage; private-hospital treatment may have limited reimbursement depending on policy terms."
         }
-      ],
-      "escalation_rules": [
-        "Pre-existing medical conditions",
-        "personalised eligibility",
-        "underwriting questions",
-        "claim disputes",
-        "coverage exceptions",
-        "low-confidence answers"
       ]
     },
     {
@@ -54,14 +46,6 @@
           "q": "Can I cover my spouse and children?",
           "a": "Yes. Eligible family members can be included subject to the plan's age, dependency and underwriting requirements."
         }
-      ],
-      "escalation_rules": [
-        "Family member with pre-existing condition",
-        "complex family eligibility",
-        "personalised coverage comparison",
-        "underwriting",
-        "claims dispute",
-        "high-value family purchase"
       ]
     },
     {
@@ -85,14 +69,6 @@
           "q": "Does Plus guarantee coverage for my existing medical condition?",
           "a": "No. Pre-existing conditions are subject to underwriting and may be covered, excluded or subject to other terms."
         }
-      ],
-      "escalation_rules": [
-        "medical history / pre-existing conditions",
-        "personalised coverage decision",
-        "underwriting",
-        "private-hospital treatment eligibility",
-        "claim approval",
-        "policy exception requests"
       ]
     },
     {
@@ -116,16 +92,6 @@
           "q": "We have 120 employees. Can you provide a quotation?",
           "a": "Yes. SalesPilot can identify your company size and requirements, then connect you with a CareSure corporate sales representative for a quotation."
         }
-      ],
-      "escalation_rules": [
-        "10+ employees / high-value lead",
-        "quotation requests",
-        "customised benefits",
-        "contract negotiation",
-        "corporate underwriting",
-        "large claims",
-        "policy exceptions",
-        "account management"
       ]
     }
   ]

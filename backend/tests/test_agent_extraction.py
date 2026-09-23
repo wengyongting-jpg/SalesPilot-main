@@ -152,12 +152,25 @@ class TestRunRecording(unittest.TestCase):
         self.assertEqual(sum(1 for s in run.steps if s.kind == "tool"), len(run.tool_calls))
         self.assertTrue(outcome.trace)
 
-    def test_the_rule_peer_records_a_rule_step(self):
+    def test_the_offline_peer_records_a_degraded_rule_step(self):
+        """`interface-v1.md` §5.7: a run with no model configured is degraded —
+        the peer is first class, but the run did not reach full capability."""
         recorder = _recorder()
-        build_extractor(model=None).extract("How much is Plus?", recorder=recorder)
+        outcome = build_extractor(model=None).extract("How much is Plus?", recorder=recorder)
         run = recorder.finish()
-        self.assertEqual([(s.name, s.kind, s.status) for s in run.steps], [("extraction", "rule", "ok")])
+        self.assertEqual([(s.name, s.kind, s.status) for s in run.steps], [("extraction", "rule", "degraded")])
+        self.assertEqual(run.status, "degraded")
+        self.assertIn("no model configured", run.steps[0].detail)
+        self.assertIn("no model configured", outcome.unavailable)
         self.assertEqual(run.totals()["llm_call_count"], 0)
+
+    def test_the_rule_peer_used_as_a_fallback_is_not_itself_degraded(self):
+        """Only the *offline* selection degrades here; a fallback after a model
+        failure is degraded by the step that actually failed."""
+        recorder = _recorder()
+        RuleExtractor().extract("How much is Plus?", recorder=recorder)
+        run = recorder.finish()
+        self.assertEqual(run.status, "ok")
 
     def test_a_model_proposed_handoff_lands_on_the_outcome_and_opens_nothing(self):
         def script(messages, info: AgentInfo):

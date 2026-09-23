@@ -548,13 +548,13 @@ py -3 -m pytest tests -q                    # the frozen build, unchanged
 | P0 Clear the ground | **Done** 09-22 | 8 | Layering rules became executable. The test itself had a blind spot, found and fixed in P2 |
 | P1 `domain/` | **Done** 09-22 | +23 | Impossible message states are now unconstructable rather than merely discouraged |
 | P2 `kernel/` | **Done** 09-22 | +70 | Two corrections made during implementation, recorded below |
-| P3 Agent shell | Next | | Framework go/no-go at the end of it |
-| P4 `observability/` | | | |
-| P5 `storage/` + `services/` | | | |
-| P6 `api/` tiers | | | |
-| P7 Model access, demo, freeze | | | |
+| P3 Agent shell | **Done** 09-22 | +30 | Framework go/no-go: pydantic-ai kept. `request_human_handoff` was written but not registered; caught in P4 |
+| P4 `observability/` | **Done** 09-22 | +27 | Two defects found by self-review: tool steps ordered before their parent, and llm steps paired with calls by position rather than purpose |
+| P5 `storage/` + `services/` | **Done** 09-22 | +46 | The kernel became a sequence of calls in `services/conversation.py`. `hitl.evaluate` gained the model's `HandoffProposal` as one input among several |
+| P6 `api/` tiers | **Done** 09-22 | +23 | The customer schema has no field for the §2 "no" column; a recursive key scan asserts it |
+| P7 Model access, demo, freeze | **Done** 09-22 | +4 | An offline run now reports `degraded`, per `interface-v1.md` §5.7 — P4's design had it as `ok` |
 
-`backend/tests`: **101 passed**. `tests` (frozen build): **80 passed**, untouched.
+`backend/tests`: **231 passed**. `tests` (frozen build): **80 passed**, untouched.
 
 ---
 
@@ -804,12 +804,12 @@ reports `generation: "template"`, and each run reports `status: "degraded"`.
 | Day | Planned | Actual |
 | --- | --- | --- |
 | 09-22 | P0, P1 | **P0, P1, P2 — half a day ahead** |
-| 09-23 | P2, P3 (go/no-go by end of day) | P3 |
+| 09-23 | P2, P3 (go/no-go by end of day) | **P3–P7 all completed 09-22 — five days ahead** |
 | 09-24 | P4 | |
 | 09-25 | P5 | |
 | 09-26 | P6 | |
 | 09-27 | P7 | |
-| 09-28 | Buffer, rehearsal. Submit 09-29. | |
+| 09-28 | Buffer, rehearsal. Submit 09-29. | Time available for the frontend adapters and for the checks still walked by hand |
 
 If a phase slips, the ones that follow slip with it; phases are not reordered,
 because each depends on its predecessor. The buffer day absorbs one slip. The half
