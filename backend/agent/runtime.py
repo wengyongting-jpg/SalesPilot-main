@@ -25,6 +25,7 @@ the work; with `TestModel` the whole loop including tool selection runs offline.
 from __future__ import annotations
 
 import time
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Optional
@@ -49,8 +50,10 @@ from .reply.model_based import ModelComposer
 from .reply.template import TemplateComposer
 from .tools import ToolContext
 from .tools import handoff as handoff_tools
+from .tools import availability as availability_tools
 from .tools import knowledge as knowledge_tools
 from .tools import opportunity as opportunity_tools
+from .tools import questions as question_tools
 from .usage import ModelUsage, from_result
 
 # How many recent messages are re-sent as context. A **bounded** window is what keeps
@@ -222,6 +225,48 @@ class AgentRuntime:
             )
             return run(self._limits())
 
+    def draft_staff_brief(self, evidence: dict) -> dict:
+        """Optional model wording for a staff-only, source-labelled brief."""
+        fallback = (
+            f"Need: {evidence['need']}\n"
+            f"Product: {evidence['product']}\n"
+            f"Handoff: {evidence['handoff_reason']}\n"
+            f"Priority / score: {evidence['priority']} / {evidence['score']}\n"
+            f"Keywords: {', '.join(evidence['keywords']) or 'none yet'}\n"
+            f"Latest customer message: {evidence['latest_message']}\n"
+            "Next step: Review the transcript, verify details and contact the customer."
+        )
+        if self.model is None:
+            return {"text": fallback, "source": "template", "usage": None}
+        prompt = json.dumps(evidence, ensure_ascii=False)
+        try:
+            agent = Agent(
+                self.model,
+                output_type=str,
+                system_prompt=(
+                    "Write a compact internal handoff brief in plain English. "
+                    "Use only the supplied evidence. Distinguish known from unknown. "
+                    "Include need, product, handoff reason, priority/score, keywords, "
+                    "latest customer quote and next step. Never invent policy facts, "
+                    "medical conclusions or a response-time promise. Under 120 words."
+                ),
+            )
+            started = time.monotonic()
+            result = self._with_limits(
+                lambda limits: agent.run_sync(prompt, usage_limits=limits)
+            )
+            duration_ms = round((time.monotonic() - started) * 1000)
+            content = str(result.output).strip()
+            if not content or len(content) > 1400:
+                raise ValueError("Model brief was empty or too long")
+            usage = from_result(
+                result, purpose="staff_brief", duration_ms=duration_ms,
+                configured_model=config.LLM_MODEL, input_text=prompt,
+                output_text=content,
+            )
+            return {"text": content, "source": "llm", "usage": usage}
+        except Exception:
+            return {"text": fallback, "source": "template", "usage": None}
     # ---- Segment 1: observe ---------------------------------------------
 
     def observe(
@@ -365,6 +410,16 @@ class AgentRuntime:
         def request_human_handoff(ctx: RunContext[ToolContext], reason: str) -> str:
             """Propose that a human representative takes over, with a reason."""
             return handoff_tools.request_human_handoff(ctx.deps, reason)
+
+        @agent.tool
+        def get_staff_availability(ctx: RunContext[ToolContext]) -> str:
+            """Read the configured CareSure representative hours and current availability. Never infer response time from opening hours."""
+            return availability_tools.get_staff_availability(ctx.deps)
+
+        @agent.tool
+        def propose_customer_question(ctx: RunContext[ToolContext], field: str) -> str:
+            """Propose one missing non-sensitive field: contact_reason, cover_type, or followup_time. The backend decides whether to ask it."""
+            return question_tools.propose_customer_question(ctx.deps, field)
 
         prompt = self._observing_prompt(text, window)
         result = self._with_limits(

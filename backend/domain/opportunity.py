@@ -122,6 +122,7 @@ class ScoreHistoryEntry:
     score: int
     state: str
     trigger: str
+    evidence: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -165,6 +166,12 @@ class Opportunity:
     # Human-in-the-loop.
     human_takeover: bool = False
     human_intervention_required: bool = False
+    # A proposed handoff is not a case. It becomes one only after the customer
+    # explicitly confirms, including when the trigger came from a model tool.
+    pending_handoff_reason: Optional[str] = None
+    pending_question_field: Optional[str] = None
+    collected_answers: dict[str, str] = field(default_factory=dict)
+    evidence_sources: dict[str, str] = field(default_factory=dict)
 
     # Qualification gate. The machine may only ever raise this to HELD; only a
     # human sets DISQUALIFIED.

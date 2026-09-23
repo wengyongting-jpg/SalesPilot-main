@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { strings } from '../strings.js';
 import { el, clear } from '../dom.js';
 
-const ROUTES = ['inbox', 'cases', 'harness'];
+const ROUTES = ['inbox', 'cases', 'debug', 'harness'];
 
 /**
  * @param {object} deps

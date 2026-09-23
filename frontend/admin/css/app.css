@@ -310,6 +310,22 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.conv-row__reason {
+  margin-top: var(--sp-2);
+  font: var(--t-small);
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv-row__keywords {
+  margin-top: var(--sp-2);
+  font: var(--t-small);
+  color: var(--c-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .conv-row__meta {
   display: flex;
@@ -434,6 +450,23 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.entry__text p { margin: 0 0 0.45em; }
+.entry__text p:last-child { margin-bottom: 0; }
+.entry__text ul { margin: 0.3em 0; padding-left: 1.35em; }
+
+.debug-route .panel-body { min-height: 35rem; }
+.debug-route #debugRequests { display: grid; gap: var(--sp-3); }
+.debug-route pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.debug-dimension { padding: var(--sp-3); margin: var(--sp-2) 0; background: var(--c-surface); border-radius: var(--radius-sm); }
+.debug-dimension p { margin: var(--sp-2) 0; }
+.case__reason { font: var(--t-body-strong); margin: var(--sp-3) 0; }
+.case__keywords { font: var(--t-small); color: var(--c-text-muted); }
+.case details { margin-top: var(--sp-4); }
+.case details summary { cursor: pointer; color: var(--c-accent); }
+.inbox__side #inboxOverview { padding: var(--sp-5); overflow-y: auto; }
+.overview__priority { display: flex; align-items: center; gap: var(--sp-3); }
+.overview__brief { white-space: pre-wrap; overflow-wrap: anywhere; font: var(--t-small); }
+.overview__source { color: var(--c-text-faint); }
 
 /* ---- Composer -------------------------------------------------------- */
 

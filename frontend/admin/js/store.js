@@ -18,7 +18,7 @@ export function createStore() {
   const listeners = new Set();
 
   const state = {
-    /** @type {'inbox'|'cases'|'harness'} */
+    /** @type {'inbox'|'cases'|'debug'|'harness'} */
     route: 'inbox',
     /** @type {string|null} opportunity id */
     selectedId: null,
@@ -55,6 +55,7 @@ export function createStore() {
     },
 
     compose: { draft: '', inFlight: false, error: null },
+    brief: { loading: false, text: '', source: '', error: null },
 
     transition: { caseId: null, inFlight: false, error: null },
 
@@ -177,6 +178,7 @@ export function createStore() {
       state.conversation.linkedCase = null;
       state.compose.draft = '';
       state.compose.error = null;
+      state.brief = { loading: false, text: '', source: '', error: null };
       state.runs = { status: 'idle', items: [], selectedRunId: null };
       notify();
     },
@@ -191,6 +193,25 @@ export function createStore() {
 
     conversationFailed() {
       state.conversation.status = 'error';
+      notify();
+    },
+
+    briefStarted() {
+      state.brief.loading = true;
+      state.brief.error = null;
+      notify();
+    },
+
+    briefLoaded(result) {
+      state.brief = {
+        loading: false, text: result.text, source: result.source, error: null,
+      };
+      notify();
+    },
+
+    briefFailed(message) {
+      state.brief.loading = false;
+      state.brief.error = message;
       notify();
     },
 

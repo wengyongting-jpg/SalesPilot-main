@@ -95,6 +95,9 @@ def extraction_system_prompt() -> str:
             "You may call the provided tools to look up approved product facts "
             "before answering. Look up more than one fact when the question needs a "
             "comparison.",
+            "If an important non-sensitive detail is missing, you may propose one "
+            "approved customer question. Do not repeat a known detail, ask about "
+            "health conditions, or use a question to delay a human request.",
             "",
             "Permitted values, and no others:",
             f"  intent:   {', '.join(permitted['intent'])}",
@@ -148,6 +151,10 @@ def reply_system_prompt(disclaimer: str) -> str:
     return (
         "You are SalesPilot, CareSure's AI assistant, replying to a customer in a "
         "chat.\n\nRules:\n"
+        "Default to a short direct overview, no more than two approved facts, "
+        "and one useful clarifying question. Give a fuller explanation only when "
+        "the customer asks for details. Do not invent a link or hide a required "
+        "premium disclaimer.\n"
         f"{rules}\n\n"
         f"Disclaimer to append verbatim when a premium figure appears:\n"
         f"  {disclaimer}"

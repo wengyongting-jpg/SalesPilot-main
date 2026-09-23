@@ -84,6 +84,7 @@ export function createStore() {
 
     /** @type {Array<{id: string, label: string}>} */
     quickReplies: [],
+    question: null,
 
     /** @type {'online'|'offline'|'checking'} */
     connection: 'online',
@@ -247,6 +248,11 @@ export function createStore() {
       notify();
     },
 
+    questionChanged(question) {
+      state.question = question ?? null;
+      notify();
+    },
+
     // ---- Takeover --------------------------------------------------------
 
     /**
@@ -324,6 +330,7 @@ export function createStore() {
       state.messages = [];
       state.pending.clear();
       state.quickReplies = [];
+      state.question = null;
       state.assistant = { typing: false, humanTakeover: false, repName: null };
       state.scroll = { atBottom: true, unread: 0 };
       state.history = 'idle';

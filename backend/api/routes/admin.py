@@ -108,12 +108,29 @@ def rep_reply(opportunity_id: str, body: RepReplyRequest, request: Request) -> d
     return {"opportunity_id": opportunity_id, "message": message_to_dict(message)}
 
 
+@router.post("/opportunities/{opportunity_id}/brief")
+def generate_staff_brief(opportunity_id: str, request: Request) -> dict:
+    """Generate a staff-only handoff draft on demand after confirmation."""
+    result = services_of(request).conversation.generate_staff_brief(opportunity_id)
+    if result is None:
+        raise errors.conflict("An active confirmed case is required")
+    return result
+
+
 # ---- Cases ----------------------------------------------------------------
 
 
 @router.get("/cases")
 def list_cases(request: Request) -> dict:
-    cases = [case_to_dict(case) for case in services_of(request).cases.list_cases()]
+    services = services_of(request)
+    cases = []
+    for case in services.cases.list_cases():
+        item = case_to_dict(case)
+        opp = services.repo.get_opportunity(case.opportunity_id, history_limit=0)
+        item["priority"] = opp.priority.value if opp and opp.priority else None
+        item["score"] = opp.final_score if opp else None
+        item["keywords"] = [signal.value for signal in opp.signals[:5]] if opp else []
+        cases.append(item)
     return {"count": len(cases), "items": cases}
 
 
@@ -189,6 +206,11 @@ def dashboard(request: Request) -> dict:
     items = []
     for opportunity in sellable:
         item = opportunity_to_dict(opportunity)
+        active_case = services.repo.active_case_for(opportunity.id)
+        item["attention_reason"] = (
+            active_case.reason if active_case else
+            opportunity.pending_handoff_reason or opportunity.main_concern
+        )
         item["messages"] = item["messages"][-1:]
         item["score_history"] = []
         item["state_history"] = []

@@ -213,6 +213,7 @@ class TestTakeoverFreeze(unittest.TestCase):
     def _under_takeover(self):
         svc = service(model=None)
         send(svc, "I want to speak to a human agent")
+        send(svc, "Confirm")
         opp = svc.repo.get_opportunity("C-1")
         self.assertTrue(opp.human_takeover, "setup failed: takeover not active")
         return svc, opp
@@ -298,6 +299,8 @@ class TestEscalation(unittest.TestCase):
         svc = service(model=None)
         send(svc, "How much is the Plus plan?")
         result = send(svc, "Can you give me a discount?")
+        self.assertIsNone(result.case)
+        result = send(svc, "Confirm")
 
         self.assertIsNotNone(result.case)
         self.assertIn("negotiation", result.case.reason.lower())
@@ -314,6 +317,7 @@ class TestEscalation(unittest.TestCase):
     def test_the_case_is_persisted_and_findable(self):
         svc = service(model=None)
         send(svc, "I want to speak to a human agent")
+        send(svc, "Confirm")
         self.assertIsNotNone(svc.repo.active_case_for("C-1"))
 
 
@@ -323,6 +327,7 @@ class TestRepReply(unittest.TestCase):
     def _service_under_takeover(self):
         svc = service(model=None)
         send(svc, "I want to speak to a human agent")
+        send(svc, "Confirm")
         return svc
 
     def test_it_is_refused_when_nobody_has_taken_over(self):
@@ -396,13 +401,19 @@ class TestRepReply(unittest.TestCase):
 
 
 class TestCaseService(unittest.TestCase):
+    @staticmethod
+    def _confirmed_service():
+        svc = service(model=None)
+        send(svc, "I want to speak to a human agent")
+        send(svc, "Confirm")
+        return svc
+
     def test_closing_a_case_resumes_autonomous_selling(self):
         """The admin console tells a representative this will happen. If it stopped
         being true the warning would become a lie."""
         from backend.services.cases import CaseService
 
-        svc = service(model=None)
-        send(svc, "I want to speak to a human agent")
+        svc = self._confirmed_service()
         case = svc.repo.active_case_for("C-1")
 
         updated = CaseService(svc.repo).transition(case.id, CaseStatus.CLOSED)
@@ -420,8 +431,7 @@ class TestCaseService(unittest.TestCase):
         """
         from backend.services.cases import CaseService
 
-        svc = service(model=None)
-        send(svc, "I want to speak to a human agent")
+        svc = self._confirmed_service()
         case = svc.repo.active_case_for("C-1")
         CaseService(svc.repo).transition(case.id, CaseStatus.TAKEN_OVER)
         self.assertTrue(svc.repo.get_opportunity("C-1").human_takeover)
@@ -436,8 +446,7 @@ class TestCaseService(unittest.TestCase):
         """
         from backend.services.cases import CaseService
 
-        svc = service(model=None)
-        send(svc, "I want to speak to a human agent")
+        svc = self._confirmed_service()
         cases = CaseService(svc.repo)
         case = svc.repo.active_case_for("C-1")
 
@@ -458,8 +467,7 @@ class TestCaseService(unittest.TestCase):
         conversation and nobody has claimed it, so reopening must claim nothing."""
         from backend.services.cases import CaseService
 
-        svc = service(model=None)
-        send(svc, "I want to speak to a human agent")
+        svc = self._confirmed_service()
         cases = CaseService(svc.repo)
         case = svc.repo.active_case_for("C-1")
 
@@ -475,8 +483,7 @@ class TestCaseService(unittest.TestCase):
         taking the case over does not change. Clearing it would lose why it opened."""
         from backend.services.cases import CaseService
 
-        svc = service(model=None)
-        send(svc, "I want to speak to a human agent")
+        svc = self._confirmed_service()
         case = svc.repo.active_case_for("C-1")
         before = svc.repo.get_opportunity("C-1").human_intervention_required
 

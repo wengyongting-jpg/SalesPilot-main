@@ -17,10 +17,12 @@ import { createIntelligence } from './views/intelligence.js';
 import { createObservability } from './views/observability.js';
 import { createCases } from './views/cases.js';
 import { createHarness } from './views/harness.js';
+import { createOverview } from './views/overview.js';
+import { createScoreEvidence } from './views/scoreEvidence.js';
 
 document.title = strings.documentTitle;
 
-const ROUTES = ['inbox', 'cases', 'harness'];
+const ROUTES = ['inbox', 'cases', 'debug', 'harness'];
 const store = createStore();
 
 let gateway = null;
@@ -42,27 +44,39 @@ const newClientId = () =>
    Actions
    ========================================================================== */
 
-async function loadInbox() {
+let inboxInFlight = false;
+let casesInFlight = false;
+let conversationRefreshInFlight = false;
+
+async function loadInbox({ silent = false } = {}) {
+  if (inboxInFlight) return;
   if (!gateway) return store.inboxFailed();
-  store.inboxLoading();
+  inboxInFlight = true;
+  if (!silent) store.inboxLoading();
   try {
     const { items } = await gateway.listConversations();
     store.inboxLoaded(items);
   } catch (error) {
     console.error('[admin] inbox load failed:', error);
-    store.inboxFailed();
+    if (!silent) store.inboxFailed();
+  } finally {
+    inboxInFlight = false;
   }
 }
 
-async function loadCases() {
+async function loadCases({ silent = false } = {}) {
+  if (casesInFlight) return;
   if (!gateway) return store.casesFailed();
-  store.casesLoading();
+  casesInFlight = true;
+  if (!silent) store.casesLoading();
   try {
     const { items } = await gateway.listCases();
     store.casesLoaded(items);
   } catch (error) {
     console.error('[admin] cases load failed:', error);
-    store.casesFailed();
+    if (!silent) store.casesFailed();
+  } finally {
+    casesInFlight = false;
   }
 }
 
@@ -71,10 +85,11 @@ async function openConversation(id) {
   store.conversationRequested(id);
   try {
     const result = await gateway.getConversation(id);
+    if (store.getState().selectedId !== id) return;
     store.conversationLoaded(result);
   } catch (error) {
     console.error('[admin] conversation load failed:', error);
-    store.conversationFailed();
+    if (store.getState().selectedId === id) store.conversationFailed();
     return;
   }
 
@@ -82,10 +97,10 @@ async function openConversation(id) {
   store.runsLoading();
   try {
     const { items } = await gateway.listAgentRuns({ opportunityId: id });
-    store.runsLoaded(items);
+    if (store.getState().selectedId === id) store.runsLoaded(items);
   } catch (error) {
     console.error('[admin] agent runs load failed:', error);
-    store.runsFailed();
+    if (store.getState().selectedId === id) store.runsFailed();
   }
 }
 
@@ -95,12 +110,15 @@ async function openConversation(id) {
  * survive. Used after a case transition.
  */
 async function refreshConversation(id) {
-  if (!gateway) return;
+  if (!gateway || conversationRefreshInFlight) return;
+  conversationRefreshInFlight = true;
   try {
     const result = await gateway.getConversation(id);
-    store.conversationLoaded(result);
+    if (store.getState().selectedId === id) store.conversationLoaded(result);
   } catch (error) {
     console.error('[admin] conversation refresh failed:', error);
+  } finally {
+    conversationRefreshInFlight = false;
   }
 }
 
@@ -144,6 +162,17 @@ async function sendReply(text) {
   }
 }
 
+async function generateStaffBrief(id) {
+  if (!gateway?.generateStaffBrief) return;
+  store.briefStarted();
+  try {
+    const result = await gateway.generateStaffBrief(id);
+    if (store.getState().selectedId === id) store.briefLoaded(result);
+  } catch (error) {
+    store.briefFailed(error.message);
+  }
+}
+
 async function seedDemoData() {
   if (!gateway) return;
   try {
@@ -163,6 +192,7 @@ function navigate(route) {
   }
   store.routeChanged(route);
   if (route === 'cases') loadCases();
+  if (route === 'debug') refreshDebug();
 }
 
 function routeFromHash() {
@@ -202,6 +232,12 @@ const repComposer = createRepComposer({
   onDraftChange: (text) => store.draftChanged(text),
 });
 
+const overview = createOverview({
+  el: document.getElementById('inboxOverview'),
+  onGenerateBrief: generateStaffBrief,
+  onOpenDebug: () => navigate('debug'),
+});
+
 const intelligence = createIntelligence({
   el: document.getElementById('panelIntelligence'),
 });
@@ -209,6 +245,10 @@ const intelligence = createIntelligence({
 const observability = createObservability({
   el: document.getElementById('panelObservability'),
   onSelectRun: (runId) => store.runSelected(runId),
+});
+
+const scoreEvidence = createScoreEvidence({
+  el: document.getElementById('debugScoreEvidence'),
 });
 
 const cases = createCases({
@@ -220,6 +260,45 @@ const cases = createCases({
     openConversation(id);
   },
 });
+
+const debugHealth = document.getElementById('debugHealth');
+const debugRequests = document.getElementById('debugRequests');
+const debugConversation = document.getElementById('debugConversation');
+debugConversation.addEventListener('change', () => {
+  if (debugConversation.value) openConversation(debugConversation.value);
+});
+let debugConversationSignature = '';
+const debugConversationView = {
+  render(state) {
+    const signature = `${state.selectedId}|${state.inbox.items.map((item) => `${item.id}:${item.name}`).join(',')}`;
+    if (signature === debugConversationSignature) return;
+    debugConversationSignature = signature;
+    clear(debugConversation);
+    debugConversation.append(el('option', { text: 'Select a conversation', attrs: { value: '' } }));
+    for (const item of state.inbox.items) {
+      debugConversation.append(el('option', {
+        text: `${item.name || item.id} · ${item.id}`,
+        attrs: { value: item.id },
+      }));
+    }
+    debugConversation.value = state.selectedId || '';
+  },
+};
+async function refreshDebug() {
+  if (!gateway) return;
+  debugHealth.textContent = (await gateway.health())
+    ? 'Backend connection: online'
+    : 'Backend connection: unavailable';
+  const exchanges = gateway.getDebugExchanges?.() ?? [];
+  clear(debugRequests);
+  for (const exchange of exchanges) {
+    const detail = el('details', {}, [
+      el('summary', { text: `${exchange.method} ${exchange.path} · ${exchange.status} · ${exchange.durationMs} ms` }),
+      el('pre', { text: JSON.stringify({ request: exchange.requestBody, response: exchange.responseBody }, null, 2) }),
+    ]);
+    debugRequests.append(detail);
+  }
+}
 
 /* ---- Panel tabs ---------------------------------------------------------- */
 
@@ -341,9 +420,12 @@ const views = [
   inboxList,
   transcript,
   repComposer,
+  overview,
+  debugConversationView,
   panelTabsView,
   intelligence,
   observability,
+  scoreEvidence,
   cases,
   harness,
 ];
@@ -356,7 +438,11 @@ store.subscribe((state) => {
    Start
    ========================================================================== */
 
-window.addEventListener('hashchange', () => store.routeChanged(routeFromHash()));
+window.addEventListener('hashchange', () => {
+  const route = routeFromHash();
+  store.routeChanged(route);
+  if (route === 'debug') refreshDebug();
+});
 
 store.routeChanged(routeFromHash());
 // routeChanged is a no-op when the value is unchanged, so force a first paint.
@@ -368,4 +454,14 @@ if (bootError) {
 } else {
   loadInbox();
   loadCases();
+  window.setInterval(() => {
+    if (document.hidden || !navigator.onLine) return;
+    const state = store.getState();
+    if (state.route === 'inbox') {
+      loadInbox({ silent: true });
+      if (state.selectedId) refreshConversation(state.selectedId);
+    } else if (state.route === 'cases') {
+      loadCases({ silent: true });
+    }
+  }, config.refreshIntervalMs);
 }

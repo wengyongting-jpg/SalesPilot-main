@@ -57,19 +57,28 @@ export function createInboxList({ el: root, onSelect, onRefresh, onSeed }) {
         el('div', { className: 'conv-row__main' }, [
           el('div', { className: 'conv-row__top' }, [
             el('span', { className: 'conv-row__name', text: item.name }),
-            el('span', { className: 'conv-row__id', text: item.id }),
           ]),
           el('div', {
             className: 'conv-row__preview',
             text: preview(item.lastMessagePreview),
           }),
+          el('div', {
+            className: 'conv-row__reason',
+            text: item.reason || 'Reason not yet established',
+          }),
+          item.keywords?.length
+            ? el('div', {
+                className: 'conv-row__keywords',
+                text: item.keywords.slice(0, 3).join(' · '),
+              })
+            : null,
         ]),
         el('div', { className: 'conv-row__meta' }, [
+          badge(item.priority ?? '—', priorityClass(item.priority)),
           el('span', {
             className: 'conv-row__score',
-            text: item.score ?? '—',
+            text: `Score ${item.score ?? '—'}`,
           }),
-          badge(item.priority ?? '—', priorityClass(item.priority)),
           item.humanTakeover
             ? badge(strings.inbox.takeoverMarker, 'badge--info')
             : el('span', {
@@ -85,7 +94,7 @@ export function createInboxList({ el: root, onSelect, onRefresh, onSeed }) {
     render(state) {
       const { status, items, counts } = state.inbox;
       const signature = `${status}|${state.selectedId}|${items
-        .map((i) => `${i.id}:${i.score}:${i.humanTakeover}`)
+        .map((i) => `${i.id}:${i.score}:${i.humanTakeover}:${i.lastMessageAt}:${i.lastMessagePreview}:${i.reason}:${i.keywords?.join('/')}`)
         .join(',')}`;
       if (signature === lastSignature) return;
       lastSignature = signature;

@@ -629,6 +629,32 @@ body {
   outline-offset: 2px;
 }
 
+.question-choices:not(:empty) {
+  display: grid;
+  gap: var(--sp-2);
+  margin: var(--sp-3) var(--sp-5);
+  padding: var(--sp-3);
+  background: var(--c-input-bg);
+  border-radius: var(--chip-radius);
+}
+
+.question-choice {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  text-align: left;
+  font: var(--t-chip);
+  color: var(--c-accent);
+  background: transparent;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--chip-radius);
+  cursor: pointer;
+}
+
+.question-choice:focus-visible {
+  outline: 3px solid var(--c-focus-ring);
+  outline-offset: 2px;
+}
+
 /* =============================================================================
    11. Composer
    ========================================================================== */

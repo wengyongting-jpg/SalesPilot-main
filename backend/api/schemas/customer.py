@@ -66,6 +66,20 @@ class QuickReply(BaseModel):
     label: str
 
 
+class CustomerQuestionOption(BaseModel):
+    model_config = _STRICT
+    id: str
+    label: str
+
+
+class CustomerQuestion(BaseModel):
+    model_config = _STRICT
+    field: str
+    prompt: str
+    options: list[CustomerQuestionOption]
+    allow_other: bool
+
+
 class CustomerReply(BaseModel):
     """The response to `POST /api/messages`.
 
@@ -83,6 +97,7 @@ class CustomerReply(BaseModel):
     # one prose string: the product cards are built from the individual entries.
     facts: list[str] = Field(default_factory=list)
     quick_replies: list[QuickReply] = Field(default_factory=list)
+    customer_question: Optional[CustomerQuestion] = None
     client_message_id: Optional[str] = None
 
 
@@ -92,6 +107,8 @@ class CustomerTranscript(BaseModel):
     conversation_id: str
     human_takeover: bool
     messages: list[CustomerMessage] = Field(default_factory=list)
+    quick_replies: list[QuickReply] = Field(default_factory=list)
+    customer_question: Optional[CustomerQuestion] = None
 
 
 class ResetResult(BaseModel):
@@ -121,6 +138,7 @@ def project_reply(payload: dict) -> CustomerReply:
             QuickReply(id=chip["id"], label=chip["label"])
             for chip in payload.get("quick_replies", [])
         ],
+        customer_question=payload.get("customer_question"),
         client_message_id=payload.get("client_message_id"),
     )
 

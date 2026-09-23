@@ -56,7 +56,7 @@ py -3 -m unittest discover -s backend/tests
 node --test "frontend/tests/**/*.test.js"
 ```
 
-Current baseline: 439 backend tests and 283 frontend tests.
+Current baseline: 428 backend tests and 283 frontend tests.
 
 For a manual end-to-end check, run `py -3 -m backend --serve --seed`, serve the
 `frontend/` directory on port 8123, open the Inbox, take over a case and send a

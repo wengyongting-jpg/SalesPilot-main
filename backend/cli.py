@@ -146,7 +146,7 @@ def _test_api() -> int:
             return 1
 
         # Cleanup test data
-        repository.delete_opportunity("test-api-check")
+        service.reset("test-api-check")
 
         print("\n" + "=" * 78)
         print("  ✅ API Test PASSED - All endpoints working")

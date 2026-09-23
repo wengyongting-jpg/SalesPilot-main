@@ -124,6 +124,16 @@ def _decimal_env(name: str, default: str) -> Decimal:
 
 LLM_COST_LIMIT_USD = _decimal_env("SALESPILOT_LLM_COST_LIMIT_USD", "0.03")
 
+# Fictional demo business: no real hours exist to look up. Configure an approved
+# schedule before telling a customer when a representative will be available.
+# JSON keys are Python weekday numbers (0 Monday ... 6 Sunday), values are arrays
+# of ["HH:MM", "HH:MM"] windows in Asia/Singapore. Dates use YYYY-MM-DD.
+STAFF_HOURS_JSON = _env("SALESPILOT_STAFF_HOURS_JSON")
+STAFF_CLOSED_DATES = frozenset(
+    value.strip() for value in _env("SALESPILOT_STAFF_CLOSED_DATES").split(",")
+    if value.strip()
+)
+
 # ---- Observability -------------------------------------------------------
 # Prompts and raw model output are recorded and returned on the admin tier.
 # Default ON: the point of this project is to show what the agent actually did,

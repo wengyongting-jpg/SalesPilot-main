@@ -777,6 +777,25 @@ export function createMockGateway({ latencyScale = 1 } = {}) {
 
   return {
     name: 'mock',
+    getDebugExchanges() { return []; },
+
+    async generateStaffBrief(id) {
+      await delay(120, latencyScale);
+      const opportunity = data.opportunities[id];
+      const linkedCase = data.cases.find(
+        (item) => item.opportunityId === id && item.statusToken !== 'CLOSED'
+      );
+      if (!opportunity || !linkedCase) {
+        const error = new Error('An active confirmed case is required');
+        error.status = 409;
+        throw error;
+      }
+      return {
+        text: `Need: ${opportunity.mainConcern ?? 'Not yet established'}\nHandoff: ${linkedCase.reason}\nNext step: Review the transcript and contact the customer.`,
+        source: 'template',
+        usage: null,
+      };
+    },
 
     capabilities: {
       repReply: true,

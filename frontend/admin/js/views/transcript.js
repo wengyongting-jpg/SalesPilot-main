@@ -12,6 +12,7 @@ import { strings } from '../strings.js';
 import { el, clear, badge, stateBlock, skeleton } from '../dom.js';
 import { applyAvatar } from '../identity.js';
 import { time, dateTime, priorityClass } from '../format.js';
+import { formatAiMessage } from '../markdown.js';
 
 /**
  * @param {object} deps
@@ -87,6 +88,9 @@ export function createTranscript({ headerEl, transcriptEl, onRetry, onViewCase }
           )
         : null;
 
+    const body = el('div', { className: 'entry__text' });
+    if (message.origin === 'ai') body.append(formatAiMessage(message.text));
+    else body.textContent = message.text;
     return el('div', { className: `entry entry--${message.origin}` }, [
       el('div', { className: 'entry__head' }, [
         el('span', { className: 'entry__origin', text: originLabel }),
@@ -97,7 +101,7 @@ export function createTranscript({ headerEl, transcriptEl, onRetry, onViewCase }
           attrs: { title: dateTime(message.ts) },
         }),
       ]),
-      el('div', { className: 'entry__text', text: message.text }),
+      body,
     ]);
   };
 

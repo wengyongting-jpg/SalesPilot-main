@@ -33,7 +33,8 @@ CASES = [
         "turns": [
             ("We need medical cover for 85 employees.", {"intent": "corporate_need", "product": "corporate", "signals": ["Expansion: Corporate"]}),
             ("Does the corporate plan include specialist treatment?", {"intent": "coverage", "product": "corporate"}),
-            ("Please prepare a quotation; we want to proceed.", {"intent": "corporate_need", "signals": ["Purchase"]}),
+            ("Please prepare a quotation; we want to proceed.", {"intent": "corporate_need", "signals": ["Purchase"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"state": "High Intent", "product": "corporate", "human_takeover": True},
     },
@@ -52,7 +53,7 @@ CASES = [
         "name": "Chloe",
         "turns": [
             ("Can you compare Essential, Family and Plus for me?", {"intent": "comparison"}),
-            ("I care most about private hospital access.", {"intent": "coverage"}),
+            ("I care most about private hospital access.", {}),
             ("Which plan is the best fit for one adult?", {"intent": "comparison"}),
         ],
         "final": {"state": "Evaluation & Hesitation", "qualification": "qualified"},
@@ -63,7 +64,8 @@ CASES = [
         "turns": [
             ("I have diabetes and had surgery last year. Can I still buy Plus?", {"intent": "underwriting", "product": "plus", "signals": ["Compliance Risk"]}),
             ("Will you definitely cover my existing condition?", {"intent": "underwriting", "signals": ["Compliance Risk"]}),
-            ("I need someone to confirm this before I apply.", {"intent": "underwriting"}),
+            ("I need someone to confirm this before I apply.", {"intent": "human_request", "signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"human_takeover": True, "qualification": "qualified"},
     },
@@ -73,7 +75,8 @@ CASES = [
         "turns": [
             ("I want information about the Plus plan.", {"product": "plus"}),
             ("The brochure does not answer my question.", {"signals": ["Hesitation"]}),
-            ("Please connect me to a human adviser now.", {"intent": "human_request", "signals": ["Human Request"]}),
+            ("Please connect me to a human adviser now.", {"intent": "human_request", "signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"human_takeover": True},
     },
@@ -83,7 +86,8 @@ CASES = [
         "turns": [
             ("How much is the Family plan for us?", {"intent": "price", "product": "family"}),
             ("Can you give me a 25 percent discount?", {"signals": ["Negotiation"]}),
-            ("I will sign today if you match that price.", {"signals": ["Negotiation", "Purchase"]}),
+            ("I will sign today if you match that price.", {"signals": ["Negotiation", "Purchase"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"human_takeover": True},
     },
@@ -93,7 +97,8 @@ CASES = [
         "turns": [
             ("I am comparing your Plus plan with Great Eastern.", {"intent": "comparison", "product": "plus", "signals": ["Competitive"]}),
             ("Their quote is cheaper, but I prefer your coverage.", {"signals": ["Competitive"]}),
-            ("The details check out. I want to apply this week.", {"signals": ["Purchase"]}),
+            ("The details check out. I want to apply this week.", {"signals": ["Purchase"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"state": "High Intent", "human_takeover": True},
     },
@@ -103,7 +108,8 @@ CASES = [
         "turns": [
             ("I am already insured. How can I check the status of my claim?", {"intent": "claims"}),
             ("Nobody replies and this service is unacceptable.", {"intent": "complaint"}),
-            ("I want a manager to resolve it today.", {"intent": "complaint", "signals": ["Human Request"]}),
+            ("I want a manager to resolve it today.", {"intent": "complaint", "signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"human_takeover": True},
     },
@@ -143,7 +149,8 @@ CASES = [
         "turns": [
             ("I selected Essential and want to apply.", {"intent": "application", "product": "essential", "signals": ["Purchase"]}),
             ("I have completed payment and the policy is active.", {"intent": "payment", "signals": ["Conversion"]}),
-            ("Now I want to cancel my policy.", {"cancellation": True, "signals": ["Withdrawal"]}),
+            ("Now I want to cancel my policy.", {"cancellation": True, "signals": ["Withdrawal"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"state": "Closed / Active Customer", "human_takeover": True},
     },

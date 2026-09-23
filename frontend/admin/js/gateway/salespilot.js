@@ -103,6 +103,7 @@ const toOpportunity = (wire) => ({
   expansion: wire.expansion ?? [],
   humanTakeover: wire.human_takeover,
   humanInterventionRequired: wire.human_intervention_required,
+  pendingHandoffReason: wire.pending_handoff_reason ?? null,
   // The truthful name. `turns` is the deprecated alias and is deliberately not
   // read anywhere in this app — interface-v1.md §1.1.
   customerMessageCount: wire.customer_message_count,
@@ -111,6 +112,7 @@ const toOpportunity = (wire) => ({
     score: entry.score,
     state: entry.state,
     trigger: entry.trigger,
+    evidence: entry.evidence ?? null,
   })),
   stateHistory: (wire.state_history ?? []).map((entry) => ({
     ts: entry.ts ? new Date(entry.ts) : null,
@@ -138,6 +140,8 @@ const toSummary = (wire) => {
     lastMessagePreview: last ? last.text : '',
     lastMessageAt: last?.ts ? new Date(last.ts) : null,
     customerMessageCount: wire.customer_message_count,
+    reason: wire.attention_reason ?? null,
+    keywords: wire.signals?.slice(0, 5) ?? [],
   };
 };
 
@@ -152,6 +156,9 @@ const toCase = (wire) => ({
   recommendedAction: wire.recommended_action,
   status: wire.status,
   statusToken: normaliseStatus(wire.status),
+  priority: wire.priority ?? null,
+  score: wire.score ?? null,
+  keywords: wire.keywords ?? [],
   createdAt: wire.created_at ? new Date(wire.created_at) : null,
 });
 
@@ -259,10 +266,25 @@ const toRun = (wire) => ({
 export function createSalesPilotGateway(config) {
   const base = (config.apiBase || '').replace(/\/$/, '');
   const admin = (path) => `${base}/api/admin${path}`;
+  const debugExchanges = [];
+  const secretField = /^(api[_-]?key|password|secret|access[_-]?token|refresh[_-]?token|authorization|cookie)$/i;
+  const redactDebug = (value) => {
+    if (Array.isArray(value)) return value.map(redactDebug);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          key, secretField.test(key) ? '[redacted]' : redactDebug(item),
+        ])
+      );
+    }
+    return value;
+  };
 
   async function request(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = performance.now();
+    const record = { method, path, requestBody: redactDebug(body ?? null), status: 0, responseBody: null, durationMs: 0 };
     try {
       const response = await fetch(path, {
         method,
@@ -271,6 +293,8 @@ export function createSalesPilotGateway(config) {
         signal: controller.signal,
       });
       const payload = await response.json().catch(() => null);
+      record.status = response.status;
+      record.responseBody = redactDebug(payload);
       if (!response.ok) {
         const error = new Error(
           describeError(payload, `${method} ${path} failed with ${response.status}`)
@@ -289,11 +313,15 @@ export function createSalesPilotGateway(config) {
       throw error;
     } finally {
       clearTimeout(timer);
+      record.durationMs = Math.round(performance.now() - startedAt);
+      debugExchanges.unshift(record);
+      if (debugExchanges.length > 30) debugExchanges.length = 30;
     }
   }
 
   return {
     name: 'salespilot',
+    getDebugExchanges: () => [...debugExchanges],
 
     // Everything the console needs is now live. `author` landed as its own axis,
     // so the transcript can distinguish an AI reply from a representative's.
@@ -381,6 +409,12 @@ export function createSalesPilotGateway(config) {
         }
       );
       return { message: toMessage(payload.message) };
+    },
+
+    async generateStaffBrief(id) {
+      return request(admin(`/opportunities/${encodeURIComponent(id)}/brief`), {
+        method: 'POST',
+      });
     },
 
     async seedDemoData() {

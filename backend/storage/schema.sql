@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS opportunities (
     score                       TEXT,
     human_takeover              INTEGER NOT NULL DEFAULT 0,
     human_intervention_required INTEGER NOT NULL DEFAULT 0,
+    pending_handoff_reason      TEXT,
+    pending_question_field      TEXT,
+    collected_answers           TEXT NOT NULL DEFAULT '{}',
+    evidence_sources            TEXT NOT NULL DEFAULT '{}',
     qualification               TEXT NOT NULL DEFAULT 'qualified',
     qualification_reason        TEXT,
     solicitation_count          INTEGER NOT NULL DEFAULT 0,
@@ -65,6 +69,7 @@ CREATE TABLE IF NOT EXISTS score_history (
     score          INTEGER NOT NULL,
     state          TEXT NOT NULL,
     trigger        TEXT NOT NULL,
+    evidence       TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (opportunity_id, seq),
     FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
 );

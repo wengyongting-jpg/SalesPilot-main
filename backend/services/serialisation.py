@@ -15,6 +15,7 @@ from ..domain.decision import NextBestAction
 from ..domain.detection import Detection, RetrievalResult
 from ..domain.message import Message
 from ..domain.opportunity import Opportunity, ScoreCard
+from ..knowledge.questions import payload as question_payload
 
 
 def result_to_dict(result) -> dict:
@@ -40,6 +41,9 @@ def result_to_dict(result) -> dict:
         "quick_replies": [
             {"id": chip.id, "label": chip.label} for chip in result.quick_replies
         ],
+        "customer_question": question_payload(
+            result.opportunity.pending_question_field if result.opportunity else None
+        ),
         "extraction_source": result.extraction_source,
         "agent_run": result.agent_run.to_dict() if result.agent_run else None,
     }
@@ -88,12 +92,18 @@ def opportunity_to_dict(opp: Optional[Opportunity]) -> Optional[dict]:
         "turns": opp.turns,
         "human_takeover": opp.human_takeover,
         "human_intervention_required": opp.human_intervention_required,
+        "pending_handoff_reason": opp.pending_handoff_reason,
+        "pending_question_field": opp.pending_question_field,
+        "customer_question": question_payload(opp.pending_question_field),
+        "collected_answers": dict(opp.collected_answers),
+        "evidence_sources": dict(opp.evidence_sources),
         "score_history": [
             {
                 "ts": entry.timestamp.isoformat(),
                 "score": entry.score,
                 "state": entry.state,
                 "trigger": entry.trigger,
+                "evidence": entry.evidence,
             }
             for entry in opp.score_history
         ],

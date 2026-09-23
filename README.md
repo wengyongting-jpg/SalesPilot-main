@@ -86,7 +86,7 @@ py -3 -m unittest discover -s backend/tests
 node --test "frontend/tests/**/*.test.js"
 ```
 
-Current baseline: 439 backend tests and 283 frontend tests pass.
+Current baseline: 428 backend tests and 283 frontend tests pass.
 
 ## Repository map
 

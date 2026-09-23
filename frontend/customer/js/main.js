@@ -16,6 +16,7 @@ import { createMessageList } from './views/messageList.js';
 import { createComposer } from './views/composer.js';
 import { createJumpToLatest } from './views/jumpToLatest.js';
 import { createQuickReplies } from './views/quickReplies.js';
+import { createQuestionChoices } from './views/questionChoices.js';
 
 document.title = strings.documentTitle;
 
@@ -58,9 +59,13 @@ async function loadHistory() {
       humanTakeover = false,
       repName = null,
       capabilities = null,
+      quickReplies: restoredQuickReplies = [],
+      question: restoredQuestion = null,
     } =
       await gateway.loadHistory(customerId);
     store.historyLoaded(messages);
+    store.quickRepliesChanged(restoredQuickReplies);
+    store.questionChanged(restoredQuestion);
     pollCursor = messages.at(-1)?.id ?? null;
     if (capabilities) store.capabilitiesDetected(capabilities);
     store.takeoverRestored(humanTakeover, repName);
@@ -112,6 +117,7 @@ async function send(text, retryClientId) {
     pollCursor = replies.at(-1)?.id ?? pollCursor;
     store.markRead(message.clientId);
     store.quickRepliesChanged(result?.quickReplies ?? []);
+    store.questionChanged(result?.question ?? null);
   } catch (error) {
     // Diagnostics go to the console; the customer sees a generic failed state.
     console.error('[customer-chat] send failed:', error);
@@ -241,7 +247,13 @@ const quickReplies = createQuickReplies({
   onSelect: (text) => send(text),
 });
 
-const views = [header, banner, messageList, jumpToLatest, quickReplies, composer];
+const questionChoices = createQuestionChoices({
+  el: document.getElementById('questionChoices'),
+  onSelect: (optionId) => send(optionId),
+  onOther: () => composer.focus(),
+});
+
+const views = [header, banner, messageList, jumpToLatest, quickReplies, questionChoices, composer];
 
 store.subscribe((state) => {
   for (const view of views) view.render(state);

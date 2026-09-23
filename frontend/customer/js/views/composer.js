@@ -106,7 +106,8 @@ export function createComposer({ el, onSend, onTyping }) {
     focus() {
       input.focus();
     },
-    render() {
+    render(state) {
+      input.maxLength = state.question ? 200 : 4000;
       // The composer is deliberately never disabled by state: not while sending
       // (requirement 2.9), not while offline (ux-spec §7), and not during human
       // takeover (requirement 7.6).

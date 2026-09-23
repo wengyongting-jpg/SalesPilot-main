@@ -107,7 +107,7 @@ class TestCustomerSurface(unittest.TestCase):
     def test_a_reply_carries_only_what_the_customer_may_see(self):
         payload = self.post("How much does CareSure Plus cost?")
         self.assertEqual(
-            {"reply", "message", "facts", "quick_replies", "human_takeover",
+            {"reply", "message", "facts", "quick_replies", "customer_question", "human_takeover",
              "client_message_id"},
             set(payload),
         )
@@ -163,7 +163,7 @@ class TestCustomerSurface(unittest.TestCase):
     def test_the_transcript_is_safe_and_complete(self):
         self.post("How much is Plus?")
         payload = self.client.get("/api/conversations/C-1").json()
-        self.assertEqual({"conversation_id", "human_takeover", "messages"},
+        self.assertEqual({"conversation_id", "human_takeover", "messages", "quick_replies", "customer_question"},
                          set(payload))
         self.assertEqual(2, len(payload["messages"]))
         present = deep_keys(payload) & set(FORBIDDEN_ON_CUSTOMER_TIER)
@@ -183,6 +183,7 @@ class TestCustomerSurface(unittest.TestCase):
 
     def test_a_human_representatives_name_reaches_the_customer_transcript(self):
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         self.client.post(
             "/api/admin/opportunities/C-1/rep-reply",
             json={"text": "Alex here.", "rep_name": "Alex"},
@@ -353,12 +354,14 @@ class TestAdminSurface(unittest.TestCase):
 
     def test_a_case_is_listed_with_its_exact_status_string(self):
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         cases = self.client.get("/api/admin/cases").json()
         self.assertEqual(1, cases["count"])
         self.assertEqual("Open", cases["items"][0]["status"])
 
     def test_a_case_transitions_through_the_exact_strings(self):
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         case_id = self.client.get("/api/admin/cases").json()["items"][0]["id"]
 
         taken = self.client.patch(
@@ -374,6 +377,7 @@ class TestAdminSurface(unittest.TestCase):
 
     def test_closing_a_case_resumes_autonomous_selling(self):
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         case_id = self.client.get("/api/admin/cases").json()["items"][0]["id"]
         self.client.patch(f"/api/admin/cases/{case_id}", json={"status": "CLOSED"})
         opp = self.client.get("/api/admin/opportunities/C-1").json()
@@ -381,6 +385,7 @@ class TestAdminSurface(unittest.TestCase):
 
     def test_case_transition_error_codes(self):
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         case_id = self.client.get("/api/admin/cases").json()["items"][0]["id"]
         self.assertEqual(
             422, self.client.patch(f"/api/admin/cases/{case_id}").status_code
@@ -422,6 +427,7 @@ class TestAdminSurface(unittest.TestCase):
 
     def test_a_rep_reply_under_takeover_is_attributed_to_the_person(self):
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         response = self.client.post(
             "/api/admin/opportunities/C-1/rep-reply",
             json={"text": "Alex here, happy to help.", "rep_name": "Alex",
@@ -437,6 +443,7 @@ class TestAdminSurface(unittest.TestCase):
     def test_the_customer_sees_the_representatives_message(self):
         """The point of the endpoint: a real person joins the conversation."""
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         self.client.post(
             "/api/admin/opportunities/C-1/rep-reply",
             json={"text": "Alex here.", "rep_name": "Alex"},
@@ -447,6 +454,7 @@ class TestAdminSurface(unittest.TestCase):
 
     def test_a_rep_reply_changes_no_sales_state(self):
         self.post("I want to speak to a human agent")
+        self.post("Confirm")
         before = self.client.get("/api/admin/opportunities/C-1").json()
         self.client.post(
             "/api/admin/opportunities/C-1/rep-reply",

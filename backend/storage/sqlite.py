@@ -62,6 +62,29 @@ class SqliteRepository:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        # Existing local demo databases predate the confirmation state.
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(opportunities)")}
+        if "pending_handoff_reason" not in columns:
+            self._conn.execute(
+                "ALTER TABLE opportunities ADD COLUMN pending_handoff_reason TEXT"
+            )
+        if "pending_question_field" not in columns:
+            self._conn.execute(
+                "ALTER TABLE opportunities ADD COLUMN pending_question_field TEXT"
+            )
+        if "collected_answers" not in columns:
+            self._conn.execute(
+                "ALTER TABLE opportunities ADD COLUMN collected_answers TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "evidence_sources" not in columns:
+            self._conn.execute(
+                "ALTER TABLE opportunities ADD COLUMN evidence_sources TEXT NOT NULL DEFAULT '{}'"
+            )
+        score_columns = {row[1] for row in self._conn.execute("PRAGMA table_info(score_history)")}
+        if "evidence" not in score_columns:
+            self._conn.execute(
+                "ALTER TABLE score_history ADD COLUMN evidence TEXT NOT NULL DEFAULT '{}'"
+            )
         self._conn.commit()
 
     # ---- Opportunities ---------------------------------------------------
@@ -76,9 +99,10 @@ class SqliteRepository:
                     main_concern, competitive_risk, churn_risk, compliance_risk,
                     expansion, last_intent, best_intent, urgency_observed,
                     customer_message_count, score, human_takeover,
-                    human_intervention_required, qualification,
+                    human_intervention_required, pending_handoff_reason,
+                    pending_question_field, collected_answers, evidence_sources, qualification,
                     qualification_reason, solicitation_count, created_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     customer_name=excluded.customer_name,
                     state=excluded.state,
@@ -97,6 +121,10 @@ class SqliteRepository:
                     score=excluded.score,
                     human_takeover=excluded.human_takeover,
                     human_intervention_required=excluded.human_intervention_required,
+                    pending_handoff_reason=excluded.pending_handoff_reason,
+                    pending_question_field=excluded.pending_question_field,
+                    collected_answers=excluded.collected_answers,
+                    evidence_sources=excluded.evidence_sources,
                     qualification=excluded.qualification,
                     qualification_reason=excluded.qualification_reason,
                     solicitation_count=excluded.solicitation_count,
@@ -121,6 +149,10 @@ class SqliteRepository:
                     json.dumps(_score_to_dict(opp.score)) if opp.score else None,
                     int(opp.human_takeover),
                     int(opp.human_intervention_required),
+                    opp.pending_handoff_reason,
+                    opp.pending_question_field,
+                    json.dumps(opp.collected_answers),
+                    json.dumps(opp.evidence_sources),
                     opp.qualification.value,
                     opp.qualification_reason,
                     opp.solicitation_count,
@@ -159,12 +191,12 @@ class SqliteRepository:
         )
         self._conn.executemany(
             """
-            INSERT INTO score_history (opportunity_id, seq, ts, score, state, trigger)
-            VALUES (?,?,?,?,?,?)
+            INSERT INTO score_history (opportunity_id, seq, ts, score, state, trigger, evidence)
+            VALUES (?,?,?,?,?,?,?)
             """,
             [
                 (opp.id, seq, entry.timestamp.isoformat(), entry.score,
-                 entry.state, entry.trigger)
+                 entry.state, entry.trigger, json.dumps(entry.evidence))
                 for seq, entry in enumerate(opp.score_history)
             ],
         )
@@ -435,6 +467,7 @@ class SqliteRepository:
             ScoreHistoryEntry(
                 timestamp=datetime.fromisoformat(row["ts"]),
                 score=row["score"], state=row["state"], trigger=row["trigger"],
+                evidence=json.loads(row["evidence"]),
             )
             for row in rows
         ]
@@ -522,6 +555,10 @@ def _row_to_opportunity(row, messages, score_history, state_history) -> Opportun
     opp.score = _dict_to_score(json.loads(row["score"])) if row["score"] else None
     opp.human_takeover = bool(row["human_takeover"])
     opp.human_intervention_required = bool(row["human_intervention_required"])
+    opp.pending_handoff_reason = row["pending_handoff_reason"]
+    opp.pending_question_field = row["pending_question_field"]
+    opp.collected_answers = json.loads(row["collected_answers"])
+    opp.evidence_sources = json.loads(row["evidence_sources"])
     opp.qualification = Qualification(row["qualification"])
     opp.qualification_reason = row["qualification_reason"]
     opp.solicitation_count = row["solicitation_count"]

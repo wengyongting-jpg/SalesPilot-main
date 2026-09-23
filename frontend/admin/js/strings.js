@@ -18,6 +18,7 @@ export const strings = {
     subtitle: 'Sales Console',
     inbox: 'Inbox',
     cases: 'Cases',
+    debug: 'Diagnostics',
     harness: 'Test Harness',
     openCases: (n) => `${n} open case${n === 1 ? '' : 's'}`,
     operatorLabel: 'Signed in as',
@@ -37,7 +38,7 @@ export const strings = {
     takeoverMarker: 'Human handling',
     selectTitle: 'Select a conversation',
     selectBody:
-      'Choose a customer on the left to see their conversation, assessment and ' +
+      'Choose a conversation to see its assessment and ' +
       'agent activity.',
     conversationFailed: 'Could not load this conversation.',
   },

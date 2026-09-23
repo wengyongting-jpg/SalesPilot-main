@@ -59,6 +59,7 @@ class ToolContext:
     opportunity: Optional[Any] = None
     calls: list[ToolCall] = field(default_factory=list)
     handoff: HandoffProposal = field(default_factory=HandoffProposal)
+    question_field: Optional[str] = None
     violations: list[ModelViolation] = field(default_factory=list)
 
     def record(self, name: str, arguments: dict[str, Any], result: str) -> str:

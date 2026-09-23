@@ -12,12 +12,14 @@ from typing import Optional
 from fastapi import APIRouter, Request
 
 from ...storage.base import MalformedCursor
+from ...services.conversation import QuestionAnswerTooLong
 from .. import errors
 from ..deps import services_of
 from ..schemas.customer import (
     CustomerReply,
     CustomerTranscript,
     IncomingMessage,
+    QuickReply,
     ResetResult,
     project_message,
     project_reply,
@@ -35,12 +37,15 @@ def post_message(payload: IncomingMessage, request: Request) -> CustomerReply:
     Omitting it leaves the original non-idempotent behaviour, where a retry after a
     timeout would advance the message count and inflate the engagement evidence.
     """
-    result = services_of(request).conversation.handle_customer_message(
-        customer_id=payload.customer_id,
-        customer_name=payload.customer_name,
-        text=payload.text,
-        client_message_id=payload.client_message_id,
-    )
+    try:
+        result = services_of(request).conversation.handle_customer_message(
+            customer_id=payload.customer_id,
+            customer_name=payload.customer_name,
+            text=payload.text,
+            client_message_id=payload.client_message_id,
+        )
+    except QuestionAnswerTooLong as error:
+        raise errors.bad_request(str(error)) from error
     return project_reply(result.to_dict())
 
 
@@ -65,12 +70,18 @@ def get_conversation(
     except MalformedCursor as error:
         raise errors.bad_request(str(error))
 
-    from ...services.serialisation import message_to_dict
+    from ...services.serialisation import message_to_dict, opportunity_to_dict
 
     return CustomerTranscript(
         conversation_id=conversation_id,
         human_takeover=opportunity.human_takeover,
         messages=[project_message(message_to_dict(m)) for m in messages],
+        quick_replies=(
+            [QuickReply(id="handoff_confirm", label="Confirm"),
+             QuickReply(id="handoff_cancel", label="Cancel")]
+            if opportunity.pending_handoff_reason else []
+        ),
+        customer_question=opportunity_to_dict(opportunity)["customer_question"],
     )
 
 

@@ -169,6 +169,8 @@ export function createSalesPilotGateway(config) {
         const latestHuman = messages.findLast((message) => message.author === 'human');
         return {
           messages,
+          quickReplies: payload.quick_replies ?? [],
+          question: payload.customer_question ?? null,
           humanTakeover: Boolean(payload.human_takeover),
           repName: latestHuman?.repName ?? null,
           capabilities: {
@@ -184,6 +186,8 @@ export function createSalesPilotGateway(config) {
         if (error.status === 404) {
           return {
             messages: [],
+            quickReplies: [],
+            question: null,
             humanTakeover: false,
             repName: null,
             capabilities: {
@@ -231,6 +235,7 @@ export function createSalesPilotGateway(config) {
         status,
         messages,
         quickReplies: payload.quick_replies ?? [],
+        question: payload.customer_question ?? null,
         humanTakeover: Boolean(payload.human_takeover),
         repName: repNameOf(replyWire),
         // Facts are returned for the product card in customer task 5. They are

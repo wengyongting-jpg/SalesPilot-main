@@ -32,7 +32,13 @@ def _labels(payload: dict) -> dict:
     opportunity = payload.get("opportunity") or {}
     return {
         "intent": detection.get("intent"),
-        "product": detection.get("product"),
+        # Confirmation is a deterministic turn without a new extraction. Its
+        # product label must come from the persisted opportunity instead.
+        "product": (
+            detection.get("product")
+            if detection.get("product") is not None
+            else opportunity.get("product")
+        ),
         "signals": detection.get("signals") or [],
         "solicitation": detection.get("solicitation"),
         "genuine_enquiry": detection.get("genuine_enquiry"),
@@ -42,6 +48,8 @@ def _labels(payload: dict) -> dict:
         "priority": opportunity.get("priority"),
         "qualification": opportunity.get("qualification"),
         "human_takeover": opportunity.get("human_takeover"),
+        "handoff_pending": bool(opportunity.get("pending_handoff_reason")),
+        "case_created": payload.get("case") is not None,
     }
 
 
@@ -60,7 +68,7 @@ def _usage(payload: dict) -> dict:
 
 
 def run_suite(*, use_model: bool, selected: set[str] | None = None,
-              max_cases: int = 20, max_turns: int = 60,
+              max_cases: int = 20, max_turns: int = 67,
               max_model_calls: int = 160, max_cost_usd: float = 1.0,
               attempt: int = 1) -> dict[str, Any]:
     built = model_factory.build() if use_model else None
@@ -161,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--case", action="append", dest="cases")
     parser.add_argument("--exclude-case", action="append", dest="excluded_cases")
     parser.add_argument("--max-cases", type=int, default=20)
-    parser.add_argument("--max-turns", type=int, default=60)
+    parser.add_argument("--max-turns", type=int, default=67)
     parser.add_argument("--max-model-calls", type=int, default=160)
     parser.add_argument("--max-cost-usd", type=float, default=1.0)
     parser.add_argument("--attempt", type=int, choices=(1, 2, 3), default=1)

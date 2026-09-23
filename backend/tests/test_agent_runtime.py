@@ -174,11 +174,12 @@ class TestModelBackedRuntime(unittest.TestCase):
         from backend.knowledge import loader
 
         # TestModel deliberately calls every registered tool. Production is capped
-        # at three; this fixture uses six so one synthetic run can exercise all five
+        # at three; this fixture uses seven so one synthetic run can exercise all
+        # registered adapters
         # adapters without turning the limit test into every runtime test.
         return AgentRuntime(
             kb=loader.load(), model=TestModel(call_tools="all"),
-            max_tool_calls=6, **kwargs
+            max_tool_calls=7, **kwargs
         )
 
     def test_a_run_completes_offline_and_selects_at_least_one_tool(self):
@@ -221,6 +222,7 @@ class TestModelBackedRuntime(unittest.TestCase):
                 {
                     "lookup_product_fact", "compare_products", "list_products",
                     "conversation_summary", "request_human_handoff",
+                    "get_staff_availability", "propose_customer_question",
                 },
             )
 
