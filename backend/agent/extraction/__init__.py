@@ -39,6 +39,7 @@ class ExtractionOutcome:
     degraded: bool = False
     degradation_reason: Optional[str] = None
     tool_calls: int = 0
+    rule_notes: list[str] = field(default_factory=list)
     # Whether the degradation is the configured mode rather than a fault: the
     # rule-based peer running because no model is configured. Chooses a log level and
     # nothing else — the outcome still reports `degraded`, because it genuinely did

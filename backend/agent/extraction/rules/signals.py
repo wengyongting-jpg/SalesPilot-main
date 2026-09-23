@@ -69,12 +69,13 @@ _PHRASES: list[tuple[Signal, tuple[str, ...]]] = [
         "how do i apply", "apply", "sign up", "enrol", "enroll", "register",
         "documents do i need", "documents i need", "buy", "purchase",
         "proceed with", "ready to get", "take up", "how can i pay",
-        "when can the policy start", "how to pay",
+        "when can the policy start", "how to pay", "want to start this week",
     )),
     (Signal.PURCHASE_PREPARATION, (
         "what documents", "documents do i need", "documents i need",
         "how long does the application", "medical check", "medical exam",
         "start date", "when does cover start", "when can the policy start",
+        "application steps", "steps to apply", "what do you need from me to apply",
     )),
     (Signal.HESITATION, (
         "expensive", "too pricey", "pricey", "too much", "cheaper",
@@ -183,6 +184,24 @@ def detect(
         signals.append(Signal.PURCHASE)
 
     return signals, concerns
+
+
+def explicit_application_preparation(text: str) -> bool:
+    """High-precision steps/materials wording that should not depend on the model.
+
+    Do not infer preparation from a bare wish to buy or apply. A withdrawal in the
+    same message wins, just as it does in the offline signal detector.
+    """
+    normalised = f" {text.lower().strip()} "
+    withdrawal_phrases = next(
+        phrases for signal, phrases in _PHRASES if signal is Signal.WITHDRAWAL
+    )
+    if any(phrase in normalised for phrase in withdrawal_phrases):
+        return False
+    return any(phrase in normalised for phrase in (
+        "application steps", "steps to apply", "documents do i need",
+        "documents i need", "what documents", "what do you need from me to apply",
+    ))
 
 
 def is_postponement(text: str) -> bool:

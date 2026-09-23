@@ -161,6 +161,29 @@ def reply_system_prompt(disclaimer: str) -> str:
     )
 
 
+def fact_selection_system_prompt() -> str:
+    """The model selects approved facts; it never authors customer-facing claims."""
+    return (
+        "Select up to two numbered approved facts relevant to the customer's latest "
+        "question. Return only their zero-based indices in the required structure. "
+        "Do not create, paraphrase, or infer any fact, procedure, benefit, timeframe, "
+        "eligibility decision, or promise. An empty selection is permitted."
+    )
+
+
+def build_fact_selection_prompt(*, facts: list[str], concern: Optional[str] = None) -> str:
+    parts = []
+    cleaned = sanitise_concern(concern)
+    if cleaned:
+        parts.append(data_section("customer concern, in their words", cleaned))
+    parts.append(data_section(
+        "approved facts available for selection",
+        "\n".join(f"{index}: {fact}" for index, fact in enumerate(facts)),
+    ))
+    parts.append("Select the indices that directly answer the latest customer message.")
+    return "\n\n".join(parts)
+
+
 def guidance_for(mode: ReplyMode) -> str:
     """The one sentence of the kernel's verdict the customer-facing path may act on.
 

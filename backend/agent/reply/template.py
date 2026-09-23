@@ -28,6 +28,13 @@ from . import ReplyOutcome, ReplyRequest
 # adds a sentence, a false negative breaches a compliance red line.
 _MONEY = re.compile(r"(S?\$|\bSGD\b)\s?\d")
 
+
+def ensure_premium_disclaimer(text: str, disclaimer: str) -> tuple[str, bool]:
+    """Enforce the approved disclaimer on the actual customer-facing wording."""
+    if disclaimer and _MONEY.search(text) and disclaimer not in text:
+        return f"{text}\n\n{disclaimer}", True
+    return text, False
+
 _OPENERS: dict[ReplyMode, str] = {
     ReplyMode.ANSWER: "Here's what I can confirm{name}:",
     ReplyMode.NURTURE: "Happy to help{name}. Here's a quick overview:",
@@ -94,8 +101,7 @@ class TemplateComposer:
         return self._outcome("\n".join(lines), request)
 
     def _outcome(self, text: str, request: ReplyRequest) -> ReplyOutcome:
-        if request.disclaimer and _MONEY.search(text):
-            text = f"{text}\n\n{request.disclaimer}"
+        text, _ = ensure_premium_disclaimer(text, request.disclaimer)
         return ReplyOutcome(
             text=text,
             generation=Generation.TEMPLATE,

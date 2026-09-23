@@ -226,6 +226,18 @@ class TestModelBackedRuntime(unittest.TestCase):
                 },
             )
 
+    def test_named_plan_comparison_exposes_only_focused_tools(self):
+        observation = self._runtime().observe(
+            "Compare Essential, Family and Plus for me."
+        )
+        names = {
+            part.tool_name for message in observation.history for part in message.parts
+            if hasattr(part, "tool_name")
+        }
+        self.assertIn("compare_products", names)
+        self.assertNotIn("list_products", names)
+        self.assertNotIn("conversation_summary", names)
+
     def test_a_handoff_request_proposes_and_opens_nothing(self):
         runtime = self._runtime()
         observation = runtime.observe("I want to speak to a human")

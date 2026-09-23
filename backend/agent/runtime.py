@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import time
 import json
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Optional
@@ -39,12 +40,13 @@ from pydantic_ai.usage import UsageLimits
 
 from .. import config
 from ..domain.decision import NextBestAction
-from ..domain.enums import Generation, KnowledgeField, Product
+from ..domain.enums import Generation, KnowledgeField, Product, Signal
 from ..knowledge.loader import KnowledgeBase
 from ..observability.violations import ModelViolation
 from . import policy, schema
 from .extraction import ExtractionOutcome
 from .extraction.rules import RuleExtractor
+from .extraction.rules import signals as signal_rules
 from .reply import ReplyOutcome, ReplyRequest
 from .reply.model_based import ModelComposer
 from .reply.template import TemplateComposer
@@ -305,6 +307,13 @@ class AgentRuntime:
 
         elapsed_ms = int(round((time.perf_counter() - began) * 1000))
         detection = schema.to_detection(result.output)
+        rule_notes = []
+        if (
+            signal_rules.explicit_application_preparation(text)
+            and Signal.PURCHASE_PREPARATION not in detection.signals
+        ):
+            detection.signals.append(Signal.PURCHASE_PREPARATION)
+            rule_notes.append("explicit application-steps wording supplied Purchase Preparation")
         violations = list(tool_context.violations)
         usage = from_result(
             result,
@@ -337,6 +346,7 @@ class AgentRuntime:
                 violations=violations,
                 degraded=bool(reasons),
                 degradation_reason="; ".join(reasons) or None,
+                rule_notes=rule_notes,
             ),
             tool_context=tool_context,
             history=list(result.all_messages()),
@@ -356,6 +366,13 @@ class AgentRuntime:
         return ""
 
     def _run_observing_agent(self, text: str, window: list, tool_context: ToolContext):
+        focused_comparison = (
+            re.search(r"\b(?:compare|comparison|versus|vs)\b", text.lower())
+            and sum(
+                bool(re.search(rf"\b{product.value}\b", text.lower()))
+                for product in Product if product is not Product.UNKNOWN
+            ) >= 2
+        )
         agent = Agent(
             self.model,
             deps_type=ToolContext,
@@ -396,15 +413,19 @@ class AgentRuntime:
                 chosen.append(member)
             return knowledge_tools.compare_products(ctx.deps, chosen_field, chosen)
 
-        @agent.tool
-        def list_products(ctx: RunContext[ToolContext]) -> str:
-            """List every CareSure plan with its positioning."""
-            return knowledge_tools.list_products(ctx.deps)
+        # Named-plan comparisons already supply the catalogue and have a bounded
+        # history in the prompt. Hide redundant tools so the three-call budget can
+        # be spent on actual comparison fields, not catalogue/summary setup.
+        if not focused_comparison:
+            @agent.tool
+            def list_products(ctx: RunContext[ToolContext]) -> str:
+                """List every CareSure plan with its positioning."""
+                return knowledge_tools.list_products(ctx.deps)
 
-        @agent.tool
-        def conversation_summary(ctx: RunContext[ToolContext]) -> str:
-            """Recall who this customer is and what has been discussed."""
-            return opportunity_tools.conversation_summary(ctx.deps)
+            @agent.tool
+            def conversation_summary(ctx: RunContext[ToolContext]) -> str:
+                """Recall who this customer is and what has been discussed."""
+                return opportunity_tools.conversation_summary(ctx.deps)
 
         @agent.tool
         def request_human_handoff(ctx: RunContext[ToolContext], reason: str) -> str:

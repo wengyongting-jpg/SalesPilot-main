@@ -37,6 +37,11 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
         "purchase the plan", "how can i pay", "when can the policy start",
         "how to pay", "policy start",
     )),
+    (Intent.COMPARISON, (
+        "cheaper", "another insurer", "other insurer", "competitor", "compare",
+        "versus", " vs ", "difference between", "different from", "better than",
+        "how are you different", "which plan",
+    )),
     (Intent.CORPORATE_NEED, (
         "employee", "employees", "company", "companies", "sme", "business",
         "corporate", "staff", "workforce", "employer", "group insurance",
@@ -44,11 +49,6 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
     (Intent.FAMILY_NEED, (
         "spouse", "wife", "husband", "child", "children", "daughter", "son",
         "family", "add my", "dependant", "dependent",
-    )),
-    (Intent.COMPARISON, (
-        "cheaper", "another insurer", "other insurer", "competitor", "compare",
-        "versus", " vs ", "difference between", "different from", "better than",
-        "how are you different",
     )),
     (Intent.CLAIMS, (
         "claim", "claims", "reimburse", "reimbursement", "payout",

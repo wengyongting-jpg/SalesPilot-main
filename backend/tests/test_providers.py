@@ -539,12 +539,12 @@ class TestUsageExtraction(unittest.TestCase):
         """An unaccounted call must be visible. The alternative is a run that reports
         a confident zero for a call that really happened."""
         from backend.agent.reply import ReplyRequest
-        from backend.agent.reply.model_based import ModelComposer
+        from backend.agent.reply.model_based import FactSelection, ModelComposer
         from backend.domain.decision import NextBestAction
         from backend.domain.enums import Priority, ReplyMode
 
         class NoUsageResult:
-            output = "Here is a reply."
+            output = FactSelection(fact_indices=[0])
             usage = None
 
             def all_messages(self):

@@ -23,6 +23,7 @@ rather than opening a second one, so a queue never shows the same customer twice
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from ..domain.detection import Detection, RetrievalResult
@@ -66,6 +67,12 @@ REASON_COMPETITIVE = (
     "intervention"
 )
 
+_CORPORATE_QUOTE_REQUEST = re.compile(
+    r"\b(?:prepare|provide|send|issue|request|need|want|get|give|"
+    r"would like)\b.{0,48}\b(?:quote|quotation)\b",
+    re.IGNORECASE,
+)
+
 
 def evaluate(
     opp,
@@ -73,6 +80,7 @@ def evaluate(
     retrieval: RetrievalResult,
     *,
     confidence_floor: float = ESCALATE_BELOW_CONFIDENCE,
+    customer_text: str = "",
 ) -> Optional[str]:
     """Return the escalation reason, or None when the assistant may continue.
 
@@ -104,11 +112,13 @@ def evaluate(
     if Signal.COMPLIANCE_RISK in signals or det.intent is Intent.UNDERWRITING:
         return REASON_UNDERWRITING
 
-    if opp.product is Product.CORPORATE and det.intent in (
-        Intent.CORPORATE_NEED,
-        Intent.PRICE,
-    ) and Signal.PURCHASE in signals:
-        return REASON_CORPORATE_QUOTE
+    if opp.product is Product.CORPORATE:
+        if _CORPORATE_QUOTE_REQUEST.search(customer_text):
+            return REASON_CORPORATE_QUOTE
+        if det.intent in (
+            Intent.CORPORATE_NEED, Intent.PRICE, Intent.APPLICATION,
+        ) and Signal.PURCHASE in signals:
+            return REASON_CORPORATE_QUOTE
 
     # Weak retrieval, but only for a specific question about a known product. A
     # generic enquiry with no match is answered generally, not escalated.

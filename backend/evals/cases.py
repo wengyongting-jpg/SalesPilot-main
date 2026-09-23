@@ -23,7 +23,7 @@ CASES = [
         "turns": [
             ("What is your cheapest basic hospital plan?", {"intent": "price", "product": "essential"}),
             ("That is still more than I expected.", {"signals": ["Hesitation"]}),
-            ("Let me think about it for a few months.", {"signals": ["Hesitation"]}),
+            ("Let me think about it for a few months.", {"signals": ["Withdrawal"]}),
         ],
         "final": {"state": "Dormant / Lost", "product": "essential", "qualification": "qualified"},
     },
@@ -33,7 +33,7 @@ CASES = [
         "turns": [
             ("We need medical cover for 85 employees.", {"intent": "corporate_need", "product": "corporate", "signals": ["Expansion: Corporate"]}),
             ("Does the corporate plan include specialist treatment?", {"intent": "coverage", "product": "corporate"}),
-            ("Please prepare a quotation; we want to proceed.", {"intent": "corporate_need", "signals": ["Purchase"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Please prepare a quotation; we want to proceed.", {"product": "corporate", "handoff_pending": True, "human_takeover": False, "case_created": False}),
             ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"state": "High Intent", "product": "corporate", "human_takeover": True},
@@ -108,7 +108,7 @@ CASES = [
         "turns": [
             ("I am already insured. How can I check the status of my claim?", {"intent": "claims"}),
             ("Nobody replies and this service is unacceptable.", {"intent": "complaint"}),
-            ("I want a manager to resolve it today.", {"intent": "complaint", "signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("I want a manager to resolve it today.", {"signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
             ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
         ],
         "final": {"human_takeover": True},

@@ -57,6 +57,7 @@ class ReplyOutcome:
     # peer composing because no model is configured. Chooses a log level and nothing
     # else. Never serialised; `interface-v1.md` is frozen.
     by_design: bool = False
+    disclaimer_appended: bool = False
 
 
 @runtime_checkable

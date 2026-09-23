@@ -246,6 +246,8 @@ class ConversationService:
                 )
             for violation in extraction.violations:
                 step.violation(violation)
+            for note in extraction.rule_notes:
+                step.note(note)
             recorder.record_tool_calls(observation.tool_context.calls)
             self._record_usage(recorder, observation.usage)
         return observation
@@ -324,7 +326,7 @@ class ConversationService:
             step.note(f"{len(retrieval.facts)} facts, confidence {retrieval.confidence}")
 
         with recorder.step("hitl", StepKind.RULE) as step:
-            case = self._escalate_if_needed(opp, det, retrieval, action, step)
+            case = self._escalate_if_needed(opp, det, retrieval, action, step, text)
             if case is not None:
                 action = next_best_action.recommend(opp, det, escalated=True)
 
@@ -399,8 +401,8 @@ class ConversationService:
             ),
         )
 
-    def _escalate_if_needed(self, opp, det, retrieval, action, step):
-        reason = hitl.evaluate(opp, det, retrieval)
+    def _escalate_if_needed(self, opp, det, retrieval, action, step, text):
+        reason = hitl.evaluate(opp, det, retrieval, customer_text=text)
         if reason is None:
             return None
 
@@ -459,6 +461,8 @@ class ConversationService:
                     reply.degradation_reason or "degraded",
                     by_design=reply.by_design,
                 )
+            if reply.disclaimer_appended:
+                step.note("approved premium disclaimer appended by deterministic guard")
             for violation in reply.violations:
                 step.violation(violation)
             self._record_usage(recorder, reply.usage)
