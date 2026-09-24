@@ -27,6 +27,7 @@ from typing import Any, Callable, Optional
 from .. import config
 from ..agent import policy, runtime
 from ..agent.extraction import Extractor, build_extractor
+from ..agent.model_factory import build as build_model
 from ..agent.reply import Composer, build_composer
 from ..domain.case import HumanCase
 from ..domain.detection import Detection, RetrievalResult
@@ -532,11 +533,11 @@ class ConversationService:
 
 def build_service(repo: Repository, **overrides: Any) -> ConversationService:
     """Wire the configured model (or none) into both peers. The one place that decides."""
-    model = runtime.build_model()
+    built = build_model()
     return ConversationService(
         repo,
-        extractor=overrides.pop("extractor", None) or build_extractor(model),
-        composer=overrides.pop("composer", None) or build_composer(model),
+        extractor=overrides.pop("extractor", None) or build_extractor(built.model),
+        composer=overrides.pop("composer", None) or build_composer(built.model),
         **overrides,
     )
 

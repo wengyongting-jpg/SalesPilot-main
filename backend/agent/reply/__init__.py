@@ -53,76 +53,12 @@ OFFLINE_REASON = "no model configured — template reply"
 
 
 # Import after dataclass definitions to avoid circular import
-from . import model_based as _model_based
-from . import template as _template
-
-
-class TemplateComposer:
-    """The offline peer: always available, never calls a model.
-
-    `offline=True` marks the step degraded, for the reason given on
-    `extraction.RuleExtractor`: the peer is first class, the *run* is not.
-    """
-
-    def __init__(self, *, offline: bool = False) -> None:
-        self._offline = offline
-
-    def compose(
-        self,
-        instruction: str,
-        retrieval: RetrievalResult,
-        *,
-        withdrawal: bool = False,
-        takeover: bool = False,
-        escalate: bool = False,
-        greeting: bool = False,
-        recorder: Optional[RunRecorder] = None,
-        customer_message: Optional[str] = None,
-    ) -> Message:
-        return _template.compose(
-            retrieval=retrieval,
-            withdrawal=withdrawal,
-            takeover=takeover,
-            escalate=escalate,
-            greeting=greeting,
-            recorder=recorder,
-            degraded_reason=OFFLINE_REASON if self._offline else None,
-        )
-
-
-class ModelComposer:
-    """The model-based peer. Falls back to the template peer when the model is
-    unavailable, and says so on the run record."""
-
-    def __init__(self, model) -> None:
-        self._model = model
-
-    def compose(
-        self,
-        instruction: str,
-        retrieval: RetrievalResult,
-        *,
-        withdrawal: bool = False,
-        takeover: bool = False,
-        escalate: bool = False,
-        greeting: bool = False,
-        recorder: Optional[RunRecorder] = None,
-        customer_message: Optional[str] = None,
-    ) -> Message:
-        return _model_based.compose(
-            model=self._model,
-            instruction=instruction,
-            retrieval=retrieval,
-            withdrawal=withdrawal,
-            takeover=takeover,
-            escalate=escalate,
-            greeting=greeting,
-            recorder=recorder,
-        )
+from .model_based import ModelComposer
+from .template import TemplateComposer
 
 
 def build_composer(model=None) -> Composer:
     """Build the appropriate composer based on model availability."""
     if model is None:
-        return TemplateComposer(offline=True)
+        return TemplateComposer()
     return ModelComposer(model)
