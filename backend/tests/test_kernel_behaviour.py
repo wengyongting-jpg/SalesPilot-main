@@ -405,6 +405,43 @@ class TestHitl(unittest.TestCase):
         )
         self.assertIsNone(reason)
 
+    # ---- P5: the model's handover proposal is one input among several -------
+
+    def _propose(self, opp, det):
+        from backend.domain.detection import HandoffProposal
+        from backend.kernel import hitl
+
+        proposal = HandoffProposal(requested=True, reason="customer seems distressed")
+        return hitl.evaluate(opp, det, self.CONFIDENT, proposal=proposal)
+
+    def test_a_proposal_is_honoured_for_a_qualified_genuine_enquiry(self):
+        from backend.kernel import hitl
+
+        reason = self._propose(opportunity(), Detection(intent=Intent.COVERAGE))
+        self.assertIsNotNone(reason)
+        self.assertTrue(reason.startswith(hitl.REASON_ASSISTANT_PROPOSED))
+        self.assertIn("distressed", reason)
+
+    def test_a_proposal_is_declined_for_a_held_conversation(self):
+        reason = self._propose(opportunity(qualification=Qualification.HELD), Detection(intent=Intent.COVERAGE))
+        self.assertIsNone(reason)
+
+    def test_a_proposal_is_declined_when_a_person_already_owns_it(self):
+        reason = self._propose(opportunity(human_takeover=True), Detection(intent=Intent.COVERAGE))
+        self.assertIsNone(reason)
+
+    def test_a_proposal_never_outranks_a_deterministic_reason(self):
+        from backend.kernel import hitl
+
+        reason = self._propose(opportunity(), Detection(intent=Intent.COMPLAINT))
+        self.assertEqual(reason, hitl.REASON_COMPLAINT)
+
+    def test_no_proposal_changes_nothing(self):
+        from backend.kernel import hitl
+
+        opp, det = opportunity(), Detection(intent=Intent.COVERAGE)
+        self.assertEqual(hitl.evaluate(opp, det, self.CONFIDENT), hitl.evaluate(opp, det, self.CONFIDENT, proposal=None))
+
 
 class TestQuickReplies(unittest.TestCase):
     """interface-v1 §5.5. Derived from the deterministic layer, never generated."""

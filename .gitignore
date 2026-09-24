@@ -8,6 +8,7 @@ secrets/
 *.key
 *.p12
 *.pfx
+.claude/
 
 # Python
 __pycache__/
@@ -43,3 +44,6 @@ Icon?
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Other documents
+SMYA_Show_Me_Your_Agent_Hackathon_Submission_Checklist.pdf

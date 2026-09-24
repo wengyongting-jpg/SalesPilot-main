@@ -1,121 +1,114 @@
 # -*- coding: utf-8 -*-
-"""Rendering an agent run for a terminal.
+"""Terminal rendering of one agent run — `docs/backend-plan.md` §7.
 
-One block per run: a header, a line per step, and a totals line. The point is that
-somebody watching the server can see what the agent did and, crucially, **that
-something went wrong without an exception being raised**.
+    ▶ run ar-91c4  C-1024  customer_message  key=c-8f2a1b40
+      0 extraction           llm        820ms  ok      gpt-4o-mini  412+88=500 tok  $0.00021
+      1 tool.lookup_fact     tool        12ms  ok      product=plus field=premium
+      2 state_transition     rule         1ms  ok      Potential Interest -> Evaluation & Hesitation
+      ✔ ok  1240ms  2 llm  1 tool  862 tok  $0.00036
 
-ASCII by default, deliberately. A Windows console at its default code page mangles
-box-drawing glyphs and arrows, and a report about something being broken should not
-itself look broken. Unicode markers are available for a terminal known to handle them.
+Degradations and contract violations print as warnings, not as silence.
+`render` is pure so tests can assert on it; `print_run` is the gated side
+effect.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import sys
+import textwrap
 
-from .run import AgentRun, RunStatus
+from .. import config
+from .run import AgentRun, LlmCall, RunStep
 
+_NAME_WIDTH = 24
+_KIND_WIDTH = 10
+_STATUS_WIDTH = 8
+_WRAP_WIDTH = 80
 
-@dataclass(frozen=True)
-class Glyphs:
-    header: str
-    ok: str
-    degraded: str
-    error: str
+_MARK_RUN = ">"
+_MARK_OK = "[OK]"
+_MARK_DEGRADED = "[WARN]"
+_MARK_ERROR = "[ERROR]"
 
-
-ASCII = Glyphs(header=">", ok="[ok]", degraded="[!]", error="[X]")
-UNICODE = Glyphs(header="\u25b6", ok="\u2714", degraded="\u26a0", error="\u2716")
-
-_STATUS_LABEL = {
-    RunStatus.OK: "ok",
-    RunStatus.DEGRADED: "DEGRADED",
-    RunStatus.ERROR: "ERROR",
-}
-
-_INDENT = "  "
+_RESET = "\033[0m"
+_COLOURS = {"ok": "\033[32m", "degraded": "\033[33m", "error": "\033[31m"}
 
 
-def render(run: AgentRun, *, glyphs: Glyphs = ASCII, width: int = 96) -> str:
-    """The whole block, as one string. Returned rather than printed so it can be
-    logged, tested and captured as easily as displayed.
-
-    Only the column-aligned lines are clipped to `width`. Detail lines — a
-    degradation reason, a violation with its permitted values, a stack trace — are
-    never clipped: they are the diagnostic payload, and the first version of this
-    renderer cut them off mid-sentence at exactly the words a reader needed.
-    """
-    lines = [(_header(run, glyphs), True)]
-    lines.extend(_step_lines(run))
-    lines.append((_footer(run, glyphs), True))
-    return "\n".join(
-        _clip(line, width) if clippable else line for line, clippable in lines
-    )
-
-
-def _header(run: AgentRun, glyphs: Glyphs) -> str:
-    parts = [f"{glyphs.header} run {run.run_id}", run.opportunity_id, run.trigger]
-    if run.client_message_id:
-        parts.append(f"key={run.client_message_id}")
-    return "  ".join(parts)
-
-
-def _step_lines(run: AgentRun) -> list[tuple[str, bool]]:
-    # Model calls are matched to steps by purpose, so the model, tokens and cost
-    # appear on the line of the step that incurred them rather than in a separate
-    # table the reader has to join by eye.
-    by_purpose: dict[str, list] = {}
-    for call in run.llm_calls:
-        by_purpose.setdefault(call.purpose, []).append(call)
-
-    lines = []
+def render(run: AgentRun, *, colour: bool = False) -> str:
+    lines = [_header(run)]
     for step in run.steps:
-        fields = [
-            f"{_INDENT}{step.index}",
-            f"{step.name:<22}",
-            f"{step.kind.value:<10}",
-            f"{step.duration_ms:>5}ms",
-            f"{_STATUS_LABEL[step.status]:<9}",
-        ]
-        calls = by_purpose.get(step.name, [])
-        if calls:
-            call = calls.pop(0)
-            fields.append(
-                f"{call.model}  {call.prompt_tokens}+{call.completion_tokens}"
-                f"={call.total_tokens} tok  {call.cost.describe()}"
-            )
-        lines.append((" ".join(fields).rstrip(), True))
-        if step.detail:
-            # The first line of the detail sits under the step; a stack trace's
-            # remaining lines are indented so the block stays scannable. None are
-            # clipped.
-            for index, detail_line in enumerate(step.detail.splitlines()):
-                prefix = f"{_INDENT}{_INDENT}" if index == 0 else f"{_INDENT}{_INDENT}  "
-                lines.append((f"{prefix}{detail_line}", False))
-    return lines
+        calls = [c for c in run.llm_calls if c.purpose == step.name] if step.kind == "llm" else []
+        lines.extend(_step_lines(step, calls, colour))
+    lines.append(_footer(run, colour))
+    return "\n".join(lines)
 
 
-def _footer(run: AgentRun, glyphs: Glyphs) -> str:
-    marker = {
-        RunStatus.OK: glyphs.ok,
-        RunStatus.DEGRADED: glyphs.degraded,
-        RunStatus.ERROR: glyphs.error,
-    }[run.status]
-    totals = run.totals()
-    parts = [
-        f"{_INDENT}{marker} {_STATUS_LABEL[run.status]}",
-        f"{run.duration_ms}ms",
-        f"{totals['llm_call_count']} llm",
-        f"{totals['tool_call_count']} tool",
-        f"{totals['total_tokens']} tok",
-        run.total_cost.describe(),
-    ]
-    if run.violations:
-        parts.append(f"{len(run.violations)} model contract violation(s)")
-    return "  ".join(parts)
+def print_run(run: AgentRun) -> None:
+    if not config.CONSOLE_TRACE:
+        return
+    colour = config.CONSOLE_COLOUR and sys.stdout.isatty()
+    print(render(run, colour=colour))
 
 
-def _clip(line: str, width: int) -> str:
-    if width <= 0 or len(line) <= width:
-        return line
-    return line[: width - 1] + "-"
+# ---- Pieces --------------------------------------------------------------------
+
+
+def _header(run: AgentRun) -> str:
+    head = f"{_MARK_RUN} run {run.run_id}  {run.opportunity_id}  {run.trigger}"
+    if run.client_message_id:
+        head += f"  key={run.client_message_id}"
+    return head
+
+
+def _step_lines(step: RunStep, calls: list[LlmCall], colour: bool) -> list[str]:
+    status_text = step.status if step.status == "ok" else step.status.upper()
+    painted = _paint(status_text, step.status, colour)
+    prefix = (
+        f"  {step.index} {step.name:<{_NAME_WIDTH}} {step.kind:<{_KIND_WIDTH}}"
+        f"{step.duration_ms:>6}ms  {painted:<{_STATUS_WIDTH}}"
+    )
+    detail = _detail(step, calls)
+    if not detail:
+        return [prefix.rstrip()]
+    if step.status == "ok":
+        return [f"{prefix}  {detail}"]
+    # A degraded/error reason may be long; wrap it under the status column so
+    # the offending value is never cut off.
+    wrapped = textwrap.wrap(detail, width=_WRAP_WIDTH)
+    indent = " " * (len(prefix) + 2)
+    first, rest = wrapped[0], wrapped[1:]
+    return [f"{prefix}  {first}"] + [f"{indent}{line}" for line in rest]
+
+
+def _detail(step: RunStep, calls: list[LlmCall]) -> str:
+    if step.status != "ok":
+        return step.detail or ""
+    if step.kind == "llm" and calls:
+        prompt = sum(c.prompt_tokens for c in calls)
+        completion = sum(c.completion_tokens for c in calls)
+        priced = [c.cost.amount for c in calls if c.cost is not None]
+        cost = f"  ${sum(priced):.5f}" if priced else ""
+        requests = f"  {len(calls)} req" if len(calls) > 1 else ""
+        return f"{calls[0].model}  {prompt}+{completion}={prompt + completion} tok{cost}{requests}"
+    return step.detail or ""
+
+
+def _footer(run: AgentRun, colour: bool) -> str:
+    status = run.status
+    if status == "ok":
+        cost = f"  ${run.total_cost.amount:.5f}" if run.total_cost is not None else ""
+        return (
+            f"  {_paint(_MARK_OK, 'ok', colour)}  {run.duration_ms}ms  "
+            f"{len(run.llm_calls)} llm  {len(run.tool_calls)} tool  "
+            f"{run.total_tokens} tok{cost}"
+        )
+    if status == "degraded":
+        reason = run.degraded_reasons[0] if run.degraded_reasons else "a step degraded"
+        return f"  {_paint(_MARK_DEGRADED, 'degraded', colour)}  {reason}"
+    failed = next((s.name for s in run.steps if s.status == "error"), "unknown step")
+    return f"  {_paint(_MARK_ERROR, 'error', colour)}  {failed} raised"
+
+
+def _paint(text: str, status: str, colour: bool) -> str:
+    if not colour:
+        return text
+    return f"{_COLOURS.get(status, '')}{text}{_RESET}"

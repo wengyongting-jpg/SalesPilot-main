@@ -36,13 +36,18 @@ from backend.domain.enums import (
 NOW = datetime(2026, 9, 22, 12, 0, 0)
 
 
-def service(repo=None, *, model=None, now=None):
+def service(repo=None, *, now=None, extractor=None, composer=None):
+    from backend.agent.extraction.rules import RuleExtractor
+    from backend.agent.reply.template import TemplateComposer
     from backend.services.conversation import ConversationService
     from backend.storage.memory import InMemoryRepository
 
     moment = now or NOW
     return ConversationService(
-        repo or InMemoryRepository(), model=model, now=lambda: moment
+        repo or InMemoryRepository(),
+        extractor=extractor or RuleExtractor(),
+        composer=composer or TemplateComposer(),
+        now=lambda: moment
     )
 
 
@@ -93,7 +98,8 @@ class TestTheKernelRunsExactlyOnce(unittest.TestCase):
     def test_the_kernel_runs_even_with_no_model_at_all(self):
         """In offline mode there is no agent loop for the kernel to live inside. This
         is the decisive reason it is not a tool."""
-        svc = service(model=None)
+        # Offline mode: use rule-based extractor and template composer
+        svc = service()
         result = send(svc, "How much is Plus?")
         self.assertIsNotNone(result.score)
         self.assertIsNotNone(result.next_best_action)
@@ -144,7 +150,7 @@ class TestIdempotency(unittest.TestCase):
         svc = service()
         send(svc, "hello", key="k1")
         send(svc, "hello", key="k1")
-        self.assertEqual(1, len(svc.repo.list_agent_runs("C-1")))
+        self.assertEqual(1, len(svc.repo.list_runs(opportunity_id="C-1")))
 
     def test_the_key_is_recorded_on_the_stored_message(self):
         svc = service()
@@ -159,12 +165,12 @@ class TestAgentRunPersistence(unittest.TestCase):
         svc = service()
         send(svc, "How much is Plus?")
         send(svc, "How do I apply?")
-        self.assertEqual(2, len(svc.repo.list_agent_runs("C-1")))
+        self.assertEqual(2, len(svc.repo.list_runs(opportunity_id="C-1")))
 
     def test_a_run_is_queryable_by_the_client_message_id(self):
         svc = service()
         send(svc, "hello", key="c-8f2a")
-        found = svc.repo.list_agent_runs("C-1", client_message_id="c-8f2a")
+        found = svc.repo.list_runs(opportunity_id="C-1", client_message_id="c-8f2a")
         self.assertEqual(1, len(found))
 
     def test_conversation_totals_accumulate(self):
@@ -175,7 +181,7 @@ class TestAgentRunPersistence(unittest.TestCase):
         self.assertEqual(2, totals["run_count"])
 
     def test_an_offline_run_is_recorded_as_degraded(self):
-        svc = service(model=None)
+        svc = service()
         run = send(svc, "How much is Plus?").to_dict()["agent_run"]
         self.assertEqual("degraded", run["status"])
         self.assertEqual(0, run["totals"]["llm_call_count"])
@@ -186,20 +192,20 @@ class TestOfflineConversation(unittest.TestCase):
     """A complete conversation with nothing configured."""
 
     def test_the_reply_is_marked_as_template_generated(self):
-        svc = service(model=None)
+        svc = service()
         result = send(svc, "How much does CareSure Plus cost?")
-        self.assertIs(Generation.TEMPLATE, result.message.generation)
-        self.assertIs(MessageRole.BUSINESS, result.message.role)
+        self.assertIs(Generation.TEMPLATE, result.reply.generation)
+        self.assertIs(MessageRole.BUSINESS, result.reply.role)
         self.assertEqual("message(rules)", result.opportunity.score_history[-1].trigger)
 
     def test_a_premium_reply_carries_the_disclaimer(self):
-        svc = service(model=None)
+        svc = service()
         result = send(svc, "How much does CareSure Plus cost?")
-        self.assertIn("S$", result.reply)
-        self.assertIn("fictional indicative", result.reply)
+        self.assertIn("S$", result.reply.text)
+        self.assertIn("fictional indicative", result.reply.text)
 
     def test_the_journey_advances_across_several_messages(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "I want private hospital coverage")
         send(svc, "How much is the Plus plan?")
         final = send(svc, "Okay, how do I apply?")
@@ -211,7 +217,7 @@ class TestTakeoverFreeze(unittest.TestCase):
     """P0-3, now through the whole pipeline rather than the kernel alone."""
 
     def _under_takeover(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "I want to speak to a human agent")
         send(svc, "Confirm")
         opp = svc.repo.get_opportunity("C-1")
@@ -251,7 +257,7 @@ class TestQualificationGate(unittest.TestCase):
     """Gap register item 13, end to end."""
 
     def test_repeated_solicitation_is_held_and_leaves_the_queue(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "We sell insurance leads, visit example.com")
         result = send(svc, "Buy our database, click here for a promo code")
 
@@ -261,24 +267,24 @@ class TestQualificationGate(unittest.TestCase):
         self.assertEqual([], result.quick_replies)
 
     def test_a_held_conversation_is_not_sold_to(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "We sell insurance leads, visit example.com")
         result = send(svc, "Buy our list now, limited offer")
-        self.assertNotIn("S$", result.reply)
-        self.assertEqual([], result.customer_facts)
+        self.assertNotIn("S$", result.reply.text)
+        self.assertEqual([], result.to_dict()["customer_facts"])
 
     def test_a_handover_reply_arrives_without_product_cards(self):
         """The reply and the cards must agree. Returning a premium alongside "a
         representative will be in touch" would put a price card under a handover
         message — and would be the assistant still selling during the handover."""
-        svc = service(model=None)
+        svc = service()
         send(svc, "How much is the Plus plan?")
         result = send(svc, "I want to speak to a human agent")
-        self.assertEqual([], result.customer_facts)
+        self.assertEqual([], result.to_dict()["customer_facts"])
         self.assertTrue(result.retrieval.facts, "retrieval still ran")
 
     def test_a_genuine_customer_is_never_held(self):
-        svc = service(model=None)
+        svc = service()
         for text in ("I want private hospital coverage",
                      "How much is the Plus plan?",
                      "Okay, how do I apply?"):
@@ -286,7 +292,7 @@ class TestQualificationGate(unittest.TestCase):
         self.assertIs(Qualification.QUALIFIED, result.opportunity.qualification)
 
     def test_the_hold_reason_is_recorded_for_review(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "We sell insurance leads, visit example.com")
         send(svc, "Buy our database now")
         opp = svc.repo.get_opportunity("C-1")
@@ -296,7 +302,7 @@ class TestQualificationGate(unittest.TestCase):
 class TestEscalation(unittest.TestCase):
     def test_a_negotiation_opens_a_case_with_an_accurate_reason(self):
         """P0-4. The reason decides how a representative prepares."""
-        svc = service(model=None)
+        svc = service()
         send(svc, "How much is the Plus plan?")
         result = send(svc, "Can you give me a discount?")
         self.assertIsNone(result.case)
@@ -308,14 +314,14 @@ class TestEscalation(unittest.TestCase):
             self.assertNotIn(wrong, result.case.reason.lower())
 
     def test_a_price_concern_opens_nothing(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "How much is the Plus plan?")
         result = send(svc, "That seems a little expensive.")
         self.assertIsNone(result.case)
         self.assertEqual([], svc.repo.list_cases())
 
     def test_the_case_is_persisted_and_findable(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "I want to speak to a human agent")
         send(svc, "Confirm")
         self.assertIsNotNone(svc.repo.active_case_for("C-1"))
@@ -325,7 +331,7 @@ class TestRepReply(unittest.TestCase):
     """`interface-v1.md` §5.4."""
 
     def _service_under_takeover(self):
-        svc = service(model=None)
+        svc = service()
         send(svc, "I want to speak to a human agent")
         send(svc, "Confirm")
         return svc
@@ -333,7 +339,7 @@ class TestRepReply(unittest.TestCase):
     def test_it_is_refused_when_nobody_has_taken_over(self):
         from backend.services.rep_reply import NotUnderTakeover, RepReplyService
 
-        svc = service(model=None)
+        svc = service()
         send(svc, "How much is Plus?")
         rep = RepReplyService(svc.repo)
         with self.assertRaises(NotUnderTakeover):
@@ -342,7 +348,7 @@ class TestRepReply(unittest.TestCase):
     def test_a_refusal_appends_nothing(self):
         from backend.services.rep_reply import NotUnderTakeover, RepReplyService
 
-        svc = service(model=None)
+        svc = service()
         send(svc, "How much is Plus?")
         before = len(svc.repo.get_opportunity("C-1").messages)
         try:
@@ -382,7 +388,7 @@ class TestRepReply(unittest.TestCase):
     def test_an_unknown_conversation_is_reported_as_missing(self):
         from backend.services.rep_reply import RepReplyService, UnknownOpportunity
 
-        svc = service(model=None)
+        svc = service()
         with self.assertRaises(UnknownOpportunity):
             RepReplyService(svc.repo).reply("C-nope", text="Hi", rep_name="Alex")
 
@@ -403,7 +409,7 @@ class TestRepReply(unittest.TestCase):
 class TestCaseService(unittest.TestCase):
     @staticmethod
     def _confirmed_service():
-        svc = service(model=None)
+        svc = service()
         send(svc, "I want to speak to a human agent")
         send(svc, "Confirm")
         return svc
@@ -494,10 +500,11 @@ class TestCaseService(unittest.TestCase):
         )
 
     def test_an_unknown_case_is_reported(self):
-        from backend.services.cases import CaseService, UnknownCase
+        from backend.services import CaseNotFound
+        from backend.services.cases import CaseService
 
-        svc = service(model=None)
-        with self.assertRaises(UnknownCase):
+        svc = service()
+        with self.assertRaises(CaseNotFound):
             CaseService(svc.repo).transition("H-nope", CaseStatus.CLOSED)
 
 
@@ -514,7 +521,7 @@ class TestPersistenceAcrossARestart(unittest.TestCase):
     def _service(self):
         from backend.storage.sqlite import SqliteRepository
 
-        return service(SqliteRepository(self.db_path), model=None)
+        return service(SqliteRepository(self.db_path))
 
     def test_a_conversation_continues_after_a_restart(self):
         svc = self._service()
@@ -579,6 +586,198 @@ class TestOnlyServicesWritesStorage(unittest.TestCase):
                         f"{path.relative_to(root)}:{node.lineno} {node.func.attr}"
                     )
         self.assertEqual([], offenders, "\n".join(offenders))
+
+
+class TestHandoffConfirmation(unittest.TestCase):
+    """Test the handoff confirmation flow (Kevin-work feature 2).
+
+    When escalation is triggered, the system now requests customer confirmation
+    before creating a case, giving them one more chance to reconsider.
+    """
+
+    def test_handoff_answer_recognizes_confirm(self):
+        """Confirm keywords return True."""
+        from backend.services.conversation import ConversationService
+
+        self.assertTrue(ConversationService._handoff_answer("Confirm"))
+        self.assertTrue(ConversationService._handoff_answer("Yes"))
+        self.assertTrue(ConversationService._handoff_answer("yes please"))
+        self.assertTrue(ConversationService._handoff_answer("确认"))
+        self.assertTrue(ConversationService._handoff_answer("是"))
+        self.assertTrue(ConversationService._handoff_answer("好的"))
+        # Case insensitive and strips punctuation
+        self.assertTrue(ConversationService._handoff_answer("CONFIRM!"))
+        self.assertTrue(ConversationService._handoff_answer("Yes."))
+
+    def test_handoff_answer_recognizes_cancel(self):
+        """Cancel keywords return False."""
+        from backend.services.conversation import ConversationService
+
+        self.assertFalse(ConversationService._handoff_answer("Cancel"))
+        self.assertFalse(ConversationService._handoff_answer("No"))
+        self.assertFalse(ConversationService._handoff_answer("no thanks"))
+        self.assertFalse(ConversationService._handoff_answer("取消"))
+        self.assertFalse(ConversationService._handoff_answer("否"))
+        self.assertFalse(ConversationService._handoff_answer("不用"))
+        # Case insensitive and strips punctuation
+        self.assertFalse(ConversationService._handoff_answer("CANCEL!"))
+        self.assertFalse(ConversationService._handoff_answer("No."))
+
+    def test_handoff_answer_returns_none_for_other_input(self):
+        """Other input returns None (treated as new question)."""
+        from backend.services.conversation import ConversationService
+
+        self.assertIsNone(ConversationService._handoff_answer("How much?"))
+        self.assertIsNone(ConversationService._handoff_answer("Tell me more"))
+        self.assertIsNone(ConversationService._handoff_answer("I need life insurance"))
+        self.assertIsNone(ConversationService._handoff_answer("Maybe"))
+
+    def test_handoff_chips_returns_confirm_and_cancel(self):
+        """Handoff chips provide Confirm and Cancel buttons."""
+        from backend.services.conversation import ConversationService
+
+        chips = ConversationService._handoff_chips()
+        self.assertEqual(len(chips), 2)
+        labels = [c.label for c in chips]
+        self.assertIn("Confirm", labels)
+        self.assertIn("Cancel", labels)
+        # Verify they have IDs
+        ids = [c.id for c in chips]
+        self.assertIn("handoff-confirm", ids)
+        self.assertIn("handoff-cancel", ids)
+
+    def test_escalation_sets_pending_instead_of_creating_case(self):
+        """When escalation is triggered, set pending_handoff_reason instead of creating case."""
+        svc = service()
+        send(svc, "I want to speak to a human agent")
+
+        opp = svc.repo.get_opportunity("C-1")
+        # Should set pending_handoff_reason
+        self.assertIsNotNone(opp.pending_handoff_reason)
+        self.assertTrue(opp.human_intervention_required)
+        # Should NOT create a case yet
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+        self.assertEqual([], svc.repo.list_cases())
+
+    def test_confirmation_prompt_is_returned(self):
+        """After escalation, the system returns a confirmation prompt."""
+        svc = service()
+        result = send(svc, "I want to speak to a human agent")
+
+        # Should return confirmation prompt
+        self.assertIn("notify", result.reply.text.lower())
+        self.assertIn("confirm", result.reply.text.lower())
+        self.assertIn("cancel", result.reply.text.lower())
+        # Should provide quick reply buttons
+        labels = [c.label for c in result.quick_replies]
+        self.assertIn("Confirm", labels)
+        self.assertIn("Cancel", labels)
+
+    def test_customer_confirm_creates_case(self):
+        """Customer confirms → case is created, takeover = True."""
+        svc = service()
+        send(svc, "I want to speak to a human agent")
+        result = send(svc, "Confirm")
+
+        # Case should be created
+        case = svc.repo.active_case_for("C-1")
+        self.assertIsNotNone(case)
+        # Reason should contain customer's request
+        self.assertTrue(len(case.reason) > 0)
+
+        # Opportunity should be under takeover
+        opp = svc.repo.get_opportunity("C-1")
+        self.assertTrue(opp.human_takeover)
+        self.assertIsNone(opp.pending_handoff_reason)
+
+        # Reply should confirm handoff
+        self.assertIn("representative", result.reply.text.lower())
+        self.assertIn("contact", result.reply.text.lower())
+
+    def test_customer_cancel_clears_pending(self):
+        """Customer cancels → pending cleared, continue AI conversation."""
+        svc = service()
+        send(svc, "I want to speak to a human agent")
+        result = send(svc, "Cancel")
+
+        # Case should NOT be created
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+        self.assertEqual([], svc.repo.list_cases())
+
+        # Pending should be cleared
+        opp = svc.repo.get_opportunity("C-1")
+        self.assertIsNone(opp.pending_handoff_reason)
+        self.assertFalse(opp.human_takeover)
+
+        # Reply should acknowledge cancellation
+        self.assertIn("understood", result.reply.text.lower())
+        self.assertIn("help", result.reply.text.lower())
+
+    def test_other_response_supersedes_handoff_offer(self):
+        """Customer replies with other content → pending cleared, treated as new question."""
+        svc = service()
+        send(svc, "I want to speak to a human agent")
+        result = send(svc, "How much is the Plus plan?")
+
+        # Case should NOT be created
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+
+        # Pending should be cleared
+        opp = svc.repo.get_opportunity("C-1")
+        self.assertIsNone(opp.pending_handoff_reason)
+
+        # Should process as new question (not a handoff response)
+        # The reply should be about the Plus plan
+        self.assertTrue(len(result.reply.text) > 0)
+
+    def test_existing_case_is_updated_not_pending(self):
+        """When there's already an active case, update it directly without confirmation."""
+        svc = service()
+        # First escalation with confirmation
+        send(svc, "I want to speak to a human agent")
+        send(svc, "Confirm")
+
+        # Verify case exists
+        first_case = svc.repo.active_case_for("C-1")
+        self.assertIsNotNone(first_case)
+        first_reason = first_case.reason
+
+        # Second escalation should update the case directly
+        result = send(svc, "Can you give me a discount?")
+
+        # Should NOT set pending (case already exists)
+        opp = svc.repo.get_opportunity("C-1")
+        self.assertIsNone(opp.pending_handoff_reason)
+
+        # Should update the existing case
+        updated_case = svc.repo.active_case_for("C-1")
+        self.assertIsNotNone(updated_case)
+        self.assertEqual(first_case.id, updated_case.id)
+        # Reason should be updated
+        self.assertNotEqual(first_reason, updated_case.reason)
+
+    def test_chinese_confirm_works(self):
+        """Chinese confirmation keywords work correctly."""
+        svc = service()
+        send(svc, "I want to speak to a human agent")
+        result = send(svc, "确认")
+
+        # Case should be created
+        self.assertIsNotNone(svc.repo.active_case_for("C-1"))
+        opp = svc.repo.get_opportunity("C-1")
+        self.assertTrue(opp.human_takeover)
+
+    def test_chinese_cancel_works(self):
+        """Chinese cancellation keywords work correctly."""
+        svc = service()
+        send(svc, "I want to speak to a human agent")
+        result = send(svc, "取消")
+
+        # Case should NOT be created
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+        opp = svc.repo.get_opportunity("C-1")
+        self.assertFalse(opp.human_takeover)
+        self.assertIsNone(opp.pending_handoff_reason)
 
 
 if __name__ == "__main__":

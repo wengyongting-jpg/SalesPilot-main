@@ -1,26 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Human case transitions: Open -> Taken Over -> Closed.
+"""Human cases and the other human review actions.
 
-The behaviour worth naming is what **closing** does: it clears `human_takeover`, which
-resumes autonomous selling on the customer's next message. The admin console tells the
-representative that will happen, so if this stopped doing it the console's warning
-would become a lie. It is asserted rather than assumed.
+Three things a person does that the machine may not: own a case (open →
+taken over → closed), disqualify a conversation, and release a held one. The
+kernel decides *whether* a case is warranted (`kernel.hitl`); this module
+carries the decision into storage and applies the lifecycle rules:
 
-Taking a case over does *not* clear the flag — it **sets** it, which is the point of
-taking it over. The two directions have to be symmetric, because the console's whole
-workflow is the round trip:
-
-    -> TAKEN_OVER   human_takeover = True,  intervention flag left as-is
-    -> CLOSED       human_takeover = False, intervention flag cleared
-    -> OPEN         both unchanged
-
-Reopening deliberately does nothing: an open case means the assistant is still handling
-the conversation and nobody has claimed it.
-
-Only the escalation path used to set the flag, so taking a case over through the API
-left it false and the following rep reply was refused with "take over first" — said to
-an operator who had just done exactly that. Specification and acceptance criteria:
-`docs/backend-contract.md` item 14.
+- one active case per opportunity — a new reason updates it (P0-3)
+- closing a case hands the conversation back to the assistant
+  (`interface-v1.md` §4.4): `human_takeover` and
+  `human_intervention_required` are cleared
 """
 from __future__ import annotations
 
@@ -28,15 +17,17 @@ from typing import Optional, Union
 
 from ..domain.case import HumanCase
 from ..domain.enums import CaseStatus
+from ..domain.opportunity import Opportunity
+from ..kernel import hitl, qualification
 from ..observability.logging import get_logger
-
-
-class UnknownCase(Exception):
-    """No case with that id."""
+from ..storage.base import Repository
+from . import CaseNotFound, InvalidTransition, OpportunityNotFound
 
 
 class CaseService:
-    def __init__(self, repo) -> None:
+    """Service wrapper for case management functions."""
+
+    def __init__(self, repo: Repository) -> None:
         self.repo = repo
         self.logger = get_logger()
 
@@ -46,19 +37,21 @@ class CaseService:
     def get(self, case_id: str) -> HumanCase:
         case = self.repo.get_case(case_id)
         if case is None:
-            raise UnknownCase(f"no case with id {case_id!r}")
+            raise CaseNotFound(f"no case with id {case_id!r}")
         return case
 
     def transition(
         self, case_id: str, status: Union[CaseStatus, str]
     ) -> HumanCase:
+        """Transition a case through its lifecycle."""
         case = self.get(case_id)
-        case.status = parse_status(status)
+        new_status = parse_status(status)
+        case.status = new_status
         self.repo.update_case(case)
 
-        if case.status is CaseStatus.TAKEN_OVER:
+        if new_status is CaseStatus.TAKEN_OVER:
             self._claim(case.opportunity_id)
-        elif case.status is CaseStatus.CLOSED:
+        elif new_status is CaseStatus.CLOSED:
             self._resume_autonomy(case.opportunity_id)
 
         self.logger.info(
@@ -66,13 +59,12 @@ class CaseService:
         )
         return case
 
-    def _claim(self, opportunity_id: str) -> None:
-        """A representative now owns the conversation, so the assistant stops selling.
+    def set_status(self, case_id: str, status: Union[CaseStatus, str]) -> HumanCase:
+        """Alias for transition() to match API route expectations."""
+        return self.transition(case_id, status)
 
-        `human_intervention_required` is left alone on purpose: it records that a person
-        was *needed*, which taking the case over does not change. Clearing it here would
-        lose the reason the case was opened.
-        """
+    def _claim(self, opportunity_id: str) -> None:
+        """A representative now owns the conversation."""
         opp = self.repo.get_opportunity(opportunity_id)
         if opp is None:
             return
@@ -80,6 +72,7 @@ class CaseService:
         self.repo.upsert_opportunity(opp)
 
     def _resume_autonomy(self, opportunity_id: str) -> None:
+        """Close the case and resume autonomous selling."""
         opp = self.repo.get_opportunity(opportunity_id)
         if opp is None:
             return
@@ -88,20 +81,79 @@ class CaseService:
         self.repo.upsert_opportunity(opp)
 
 
-def parse_status(status: Union[CaseStatus, str]) -> CaseStatus:
-    """Accept an enum, an enum name, or a serialised value.
+def open_or_update_case(
+    repo: Repository, opp: Opportunity, *, reason: str, recommended_action: str
+) -> tuple[HumanCase, bool]:
+    """Return `(case, created)`. Never opens a second active case."""
+    existing = repo.active_case_for(opp.id)
+    if existing is not None:
+        existing.reason = reason
+        existing.recommended_action = recommended_action
+        existing.state = opp.state
+        existing.product = opp.product
+        existing.summary = f"{existing.summary}\n[Update] {hitl.summarise(opp)} Reason: {reason}"
+        repo.update_case(existing)
+        return existing, False
+    case = HumanCase(
+        opportunity_id=opp.id,
+        customer_name=opp.customer_name,
+        state=opp.state,
+        product=opp.product,
+        reason=reason,
+        summary=hitl.summarise(opp),
+        recommended_action=recommended_action,
+    )
+    repo.add_case(case)
+    return case, True
 
-    Clients send `TAKEN_OVER` and `"Taken Over"` interchangeably, and normalising here
-    keeps that leniency in one place instead of spread across the route handlers.
-    """
-    if isinstance(status, CaseStatus):
-        return status
-    raw = str(status).strip()
+
+def parse_status(value: Union[CaseStatus, str]) -> CaseStatus:
+    """Accept enum, name, or serialised value."""
+    if isinstance(value, CaseStatus):
+        return value
+    raw = str(value).strip()
     try:
         return CaseStatus[raw.upper().replace("-", "_").replace(" ", "_")]
     except KeyError:
         pass
     try:
         return CaseStatus(raw)
-    except ValueError as error:
-        raise ValueError(f"invalid case status: {raw!r}") from error
+    except ValueError:
+        pass
+    normalized = raw.replace("-", "_").replace(" ", "_").upper()
+    try:
+        return CaseStatus[normalized]
+    except KeyError as error:
+        raise InvalidTransition(f"invalid case status: {raw!r}") from error
+
+
+def set_status(repo: Repository, case_id: str, status: CaseStatus) -> HumanCase:
+    case = repo.get_case(case_id)
+    if case is None:
+        raise CaseNotFound(f"no case with id {case_id!r}")
+    case.status = status
+    repo.update_case(case)
+    return case
+
+
+def disqualify(repo: Repository, opportunity_id: str, *, reason: str) -> Opportunity:
+    opp = _require(repo, opportunity_id)
+    opp.qualification = qualification.disqualify(opp, reason=reason)
+    repo.upsert_opportunity(opp)
+    return opp
+
+
+def release(repo: Repository, opportunity_id: str, *, reason: Optional[str] = None) -> Opportunity:
+    opp = _require(repo, opportunity_id)
+    opp.human_intervention_required = False
+    if reason:
+        opp.main_concern = reason
+    repo.upsert_opportunity(opp)
+    return opp
+
+
+def _require(repo: Repository, opportunity_id: str) -> Opportunity:
+    opp = repo.get_opportunity(opportunity_id)
+    if opp is None:
+        raise OpportunityNotFound(f"no opportunity with id {opportunity_id!r}")
+    return opp

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS opportunities (
     customer_name               TEXT NOT NULL,
     state                       TEXT NOT NULL,
     product                     TEXT NOT NULL,
+    priority                    TEXT,
     signals                     TEXT NOT NULL DEFAULT '[]',
     signal_history              TEXT NOT NULL DEFAULT '[]',
     main_concern                TEXT,
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS opportunities (
     qualification_reason        TEXT,
     solicitation_count          INTEGER NOT NULL DEFAULT 0,
     created_at                  TEXT NOT NULL,
-    updated_at                  TEXT NOT NULL
+    updated_at                  TEXT NOT NULL,
+    payload                     TEXT NOT NULL DEFAULT '{}'
 );
 
 -- `seq` rather than a timestamp is the ordering key: two messages in the same
@@ -95,7 +97,8 @@ CREATE TABLE IF NOT EXISTS cases (
     summary            TEXT NOT NULL,
     recommended_action TEXT NOT NULL,
     status             TEXT NOT NULL,
-    created_at         TEXT NOT NULL
+    created_at         TEXT NOT NULL,
+    payload            TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_cases_opportunity
@@ -109,6 +112,7 @@ CREATE TABLE IF NOT EXISTS message_receipts (
     client_message_id TEXT NOT NULL,
     schema_version    INTEGER NOT NULL DEFAULT 1,
     response          TEXT NOT NULL,
+    document          TEXT NOT NULL DEFAULT '{}',
     created_at        TEXT NOT NULL,
     PRIMARY KEY (opportunity_id, client_message_id)
 );

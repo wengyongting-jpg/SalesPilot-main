@@ -1,119 +1,92 @@
 # -*- coding: utf-8 -*-
-"""Aggregate analytics over the opportunity queue. Read-only.
+"""Read-only analytics over the repository — `interface-v1.md` §4.2 fields.
 
-Two properties the previous version did not have, both consequences of the redesign:
-
-**Held conversations are excluded from the sales figures and counted separately.** A
-funnel that includes advertising traffic is not a funnel. The previous build had no
-way to tell the difference, so spam sat in the queue as a MEDIUM-priority lead.
-
-**Cost is reported.** The token and money totals across every agent run belong next
-to the pipeline they paid for.
+JSON-serialisable so the admin API (P6) serves it directly. The opportunity
+value score is used for sales prioritisation only and never for an insurance
+decision. Ported from `salespilot/analytics/metrics.py`; adds the
+qualification breakdown the rebuild introduced (contract item 13).
 """
 from __future__ import annotations
 
 from collections import Counter
 
-from ..domain.enums import OpportunityState, Priority, Qualification
+from ..domain.enums import CaseStatus, OpportunityState, Priority, Qualification
+from ..storage.base import Repository
 
-# Funnel order, not alphabetical: the sequence is the point of a funnel.
-FUNNEL = (
+FUNNEL = [
     OpportunityState.COLD_LEAD,
     OpportunityState.POTENTIAL_INTEREST,
     OpportunityState.EVALUATION_HESITATION,
     OpportunityState.HIGH_INTENT,
     OpportunityState.CLOSED_ACTIVE,
     OpportunityState.DORMANT_LOST,
-)
+]
 
 
 class AnalyticsService:
-    def __init__(self, repo) -> None:
+    """Service wrapper for analytics functions."""
+
+    def __init__(self, repo: Repository) -> None:
         self.repo = repo
 
-    def compute(self) -> dict:
-        everything = self.repo.list_opportunities()
-        sellable = [opp for opp in everything if opp.is_sellable]
-        held = [
-            opp for opp in everything
-            if opp.qualification is Qualification.HELD
-        ]
-        disqualified = [
-            opp for opp in everything
-            if opp.qualification is Qualification.DISQUALIFIED
-        ]
-        cases = self.repo.list_cases()
+    def compute_analytics(self) -> dict:
+        return compute_analytics(self.repo)
 
-        by_state = Counter(opp.state.value for opp in sellable)
-        by_priority = Counter(
-            (opp.priority or Priority.LOW).value for opp in sellable
-        )
-        by_product = Counter(opp.product.value for opp in sellable)
+    def health(self) -> dict:
+        return health(self.repo)
 
-        signals: Counter[str] = Counter()
-        for opp in sellable:
-            for signal in opp.signals:
-                signals[signal.value] += 1
 
-        scores = [opp.final_score for opp in sellable if opp.final_score is not None]
-        converted = by_state.get(OpportunityState.CLOSED_ACTIVE.value, 0)
-        lost = by_state.get(OpportunityState.DORMANT_LOST.value, 0)
-        resolved = converted + lost
+def compute_analytics(repo: Repository) -> dict:
+    opps = repo.list_opportunities()
+    # Separate held traffic from the sales funnel
+    sellable_opps = [opp for opp in opps if opp.is_sellable]
+    cases = repo.list_cases()
+    runs = repo.list_runs(limit=1000)  # Get recent runs for cost calculation
 
-        return {
-            # Sales figures count only what is actually a sales opportunity.
-            "total_opportunities": len(sellable),
-            "by_priority": {
-                band.value: by_priority.get(band.value, 0) for band in Priority
-            },
-            "by_state": {
-                state.value: by_state.get(state.value, 0) for state in FUNNEL
-            },
-            "by_product": dict(sorted(by_product.items())),
-            "funnel": [
-                {"state": state.value, "count": by_state.get(state.value, 0)}
-                for state in FUNNEL
-            ],
-            "signals": dict(signals.most_common()),
-            "average_score": (
-                round(sum(scores) / len(scores), 1) if scores else 0.0
-            ),
-            "escalated_opportunities": sum(
-                1 for opp in sellable if opp.human_takeover
-            ),
-            "human_cases_total": len(cases),
-            "human_cases_open": sum(1 for case in cases if case.status.value == "Open"),
-            "competitive_risks": sum(1 for opp in sellable if opp.competitive_risk),
-            "conversion_rate_of_closed": (
-                round(converted / resolved, 3) if resolved else 0.0
-            ),
-            "converted": converted,
-            "lost": lost,
-            # Reported separately rather than mixed in, so a reviewer can see how much
-            # traffic is being filtered and check that the gate is not overreaching.
-            "qualification": {
-                "qualified": len(sellable),
-                "held": len(held),
-                "disqualified": len(disqualified),
-            },
-            "cost": self._cost(everything),
-        }
+    by_state = Counter(opp.state.value for opp in sellable_opps)
+    by_priority = Counter((opp.priority or Priority.LOW).value for opp in sellable_opps)
+    by_product = Counter(opp.product.value for opp in sellable_opps)
+    # Qualification breakdown includes ALL opps (to show held count)
+    by_qualification = Counter(opp.qualification.value for opp in opps)
+    signal_counts: Counter[str] = Counter(s.value for opp in sellable_opps for s in opp.signals)
 
-    def _cost(self, opportunities) -> dict:
-        tokens = 0
-        amount = 0.0
-        runs = 0
-        pricing_known = True
-        for opp in opportunities:
-            totals = self.repo.conversation_totals(opp.id)
-            runs += totals["run_count"]
-            tokens += totals["total_tokens"]
-            amount += totals["cost"]["amount"]
-            pricing_known = pricing_known and totals["cost"]["pricing_known"]
-        return {
-            "agent_runs": runs,
-            "total_tokens": tokens,
-            "amount": round(amount, 8),
-            "currency": "USD",
-            "pricing_known": pricing_known,
-        }
+    scores = [opp.score.total for opp in sellable_opps if opp.score]
+    converted = by_state.get(OpportunityState.CLOSED_ACTIVE.value, 0)
+    lost = by_state.get(OpportunityState.DORMANT_LOST.value, 0)
+    resolved = converted + lost
+
+    # Calculate total cost from agent runs
+    total_cost = 0.0
+    for run_dict in runs:
+        if run_dict.get("total_cost"):
+            total_cost += run_dict["total_cost"]["amount"]
+
+    return {
+        "total_opportunities": len(sellable_opps),  # Only sellable opportunities in funnel
+        "by_priority": {p.value: by_priority.get(p.value, 0) for p in Priority},
+        "by_state": {s.value: by_state.get(s.value, 0) for s in FUNNEL},
+        "by_product": dict(sorted(by_product.items())),
+        "qualification": {q.value: by_qualification.get(q.value, 0) for q in Qualification},  # Changed key from "by_qualification"
+        "funnel": [{"state": s.value, "count": by_state.get(s.value, 0)} for s in FUNNEL],
+        "signals": dict(signal_counts.most_common()),
+        "average_score": round(sum(scores) / len(scores), 1) if scores else 0.0,
+        "escalated_opportunities": sum(1 for opp in sellable_opps if opp.human_takeover),
+        "human_cases_total": len(cases),
+        "human_cases_open": sum(1 for c in cases if c.status is CaseStatus.OPEN),
+        "competitive_risks": sum(1 for opp in sellable_opps if opp.competitive_risk),
+        "conversion_rate_of_closed": round(converted / resolved, 3) if resolved else 0.0,
+        "converted": converted,
+        "lost": lost,
+        "cost": round(total_cost, 5),
+    }
+
+
+def health(repo: Repository) -> dict:
+    return {
+        "status": "ok",
+        "conversations": len(repo.list_opportunities()),  # "conversations" is the API term for opportunities
+        "opportunities": len(repo.list_opportunities()),  # Keep for backward compatibility
+        "open_cases": sum(1 for c in repo.list_cases() if c.status is CaseStatus.OPEN),
+        "provider": "template",  # No model configured, using templates
+        "degraded": True,  # Template-only mode is degraded
+    }

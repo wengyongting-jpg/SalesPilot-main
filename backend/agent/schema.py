@@ -54,9 +54,9 @@ class ExtractionOutput(BaseModel):
         default_factory=list,
         description="Observable sales evidence present in this message.",
     )
-    concern: str = Field(
-        default="",
-        description="The customer's main concern in a short phrase, or empty.",
+    concerns: list[str] = Field(
+        default_factory=list,
+        description="Short free-text notes on objections raised (e.g. 'Price', 'Coverage gaps').",
     )
     genuine_enquiry: bool = Field(
         default=True,
@@ -70,6 +70,14 @@ class ExtractionOutput(BaseModel):
         description=(
             "True when the sender is offering or promoting something to us rather "
             "than asking about cover."
+        ),
+    )
+    restricted: bool = Field(
+        default=False,
+        description=(
+            "True when the message touches something outside the assistant's "
+            "authority: personalised medical/underwriting judgement, a claim "
+            "decision, a custom quotation, or an explicit request for a person."
         ),
     )
     cancellation: bool = Field(
@@ -96,88 +104,87 @@ def allowed_values() -> dict[str, list[str]]:
 
 
 def to_detection(output: ExtractionOutput) -> Detection:
-    concern = output.concern.strip()
+    """Convert the model's output to a Detection domain object."""
     return Detection(
         intent=output.intent,
         product=output.product,
-        signals=list(output.signals),
-        concerns=[concern] if concern else [],
-        restricted=_is_restricted(output.signals, output.intent),
-        cancellation=output.cancellation,
-        postponement=output.postponement,
+        signals=output.signals,
+        concerns=output.concerns,
         genuine_enquiry=output.genuine_enquiry,
         solicitation=output.solicitation,
+        restricted=output.restricted,
+        cancellation=output.cancellation,
+        postponement=output.postponement,
     )
 
 
-def parse(payload: dict) -> tuple[Detection, list[ModelViolation]]:
-    """Read a raw model payload, recording anything the domain rejects.
+def parse(payload: dict, *, customer_text: str = "") -> ExtractionOutput:
+    """Lenient parse that records violations and falls back.
 
-    Used when a response arrives outside the strict schema — a provider without
-    structured-output support, or a validation retry that still came back wrong.
-    Every substitution produces a violation, because an unrecorded downgrade is
-    exactly the defect this rebuild exists to remove.
+    Used when the model returned something outside the schema. The violation is
+    recorded (never silent) and a safe fallback is substituted.
     """
     violations: list[ModelViolation] = []
-    permitted = allowed_values()
 
-    intent = _coerce(
-        payload.get("intent"), Intent, "intent", permitted["intent"], violations,
-        default=Intent.GENERIC,
-    )
-    product = _coerce(
-        payload.get("product"), Product, "product", permitted["product"], violations,
-        default=Product.UNKNOWN,
-    )
-
-    signals: list[Signal] = []
-    for raw in payload.get("signals") or []:
-        signal = _coerce(
-            raw, Signal, "signals", permitted["signals"], violations, default=None
-        )
-        if signal is not None and signal not in signals:
-            signals.append(signal)
-
-    concern = str(payload.get("concern") or "").strip()
-
-    return (
-        Detection(
-            intent=intent,
-            product=product,
-            signals=signals,
-            concerns=[concern] if concern else [],
-            restricted=_is_restricted(signals, intent),
-            cancellation=bool(payload.get("cancellation", False)),
-            postponement=bool(payload.get("postponement", False)),
-            genuine_enquiry=bool(payload.get("genuine_enquiry", True)),
-            solicitation=bool(payload.get("solicitation", False)),
-        ),
-        violations,
-    )
-
-
-def _coerce(raw, enum_cls, field_name, permitted, violations, *, default):
-    """Turn a raw value into an enum member, or record why it could not be."""
-    if raw is None:
-        return default
+    # Parse intent with fallback
+    intent_str = payload.get("intent", "generic")
     try:
-        return enum_cls(raw)
+        intent = Intent(intent_str)
     except ValueError:
         violations.append(
-            ModelViolation(field=field_name, value=str(raw), allowed=list(permitted))
+            ModelViolation(
+                field="intent",
+                invalid_value=intent_str,
+                allowed_values=[m.value for m in Intent],
+                context=customer_text[:100],
+            )
         )
-        return default
+        intent = Intent.GENERIC
 
+    # Parse product with fallback
+    product_str = payload.get("product", "unknown")
+    try:
+        product = Product(product_str)
+    except ValueError:
+        violations.append(
+            ModelViolation(
+                field="product",
+                invalid_value=product_str,
+                allowed_values=[m.value for m in Product],
+                context=customer_text[:100],
+            )
+        )
+        product = Product.UNKNOWN
 
-def _is_restricted(signals, intent) -> bool:
-    """Whether the message touches something outside the assistant's authority.
+    # Parse signals with fallback
+    signals_raw = payload.get("signals", [])
+    signals: list[Signal] = []
+    for sig_str in signals_raw:
+        try:
+            signals.append(Signal(sig_str))
+        except ValueError:
+            violations.append(
+                ModelViolation(
+                    field="signals",
+                    invalid_value=sig_str,
+                    allowed_values=[m.value for m in Signal],
+                    context=customer_text[:100],
+                )
+            )
 
-    Derived here rather than trusted from the model: it decides whether a reply is
-    allowed at all, so it is not a judgement to delegate.
-    """
-    restricted_signals = {
-        Signal.HUMAN_REQUEST, Signal.COMPLIANCE_RISK, Signal.NEGOTIATION,
-    }
-    return bool(set(signals) & restricted_signals) or intent in (
-        Intent.UNDERWRITING, Intent.COMPLAINT,
+    # Record violations if any occurred
+    if violations:
+        from ..observability.recorder import record_violations
+        record_violations(violations)
+
+    return ExtractionOutput(
+        intent=intent,
+        product=product,
+        signals=signals,
+        concerns=payload.get("concerns", []),
+        genuine_enquiry=payload.get("genuine_enquiry", True),
+        solicitation=payload.get("solicitation", False),
+        restricted=payload.get("restricted", False),
+        cancellation=payload.get("cancellation", False),
+        postponement=payload.get("postponement", False),
     )

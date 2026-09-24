@@ -1,35 +1,56 @@
 # -*- coding: utf-8 -*-
-"""Mapping service-layer failures onto HTTP status codes.
+"""Service errors → HTTP status codes, in FastAPI's default `{"detail": …}` shape.
 
-The distinctions are deliberate, because a client can only respond sensibly to a
-failure it can tell apart from the others:
-
-    404  the conversation or case does not exist
-    409  it exists, but the operation does not apply to its current state — a
-         representative reply while nobody has taken over
-    400  the request was understood and its content was wrong, such as a cursor that
-         is neither a message id nor a timestamp
-    422  the request could not be parsed against its model at all
-
-Collapsing 409 into 400, or 400 into 422, would leave a frontend guessing whether to
-retry, to fix the input, or to tell the user something has changed underneath them.
+`interface-v1.md` §4.5: there is no application-specific error envelope.
+Anything not mapped here is a program error and surfaces as FastAPI's own
+500 — `docs/backend-plan.md` §7's first failure class, never disguised.
 """
 from __future__ import annotations
 
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 
-def not_found(detail: str):
-    from fastapi import HTTPException
+from ..services import (
+    CaseNotFound,
+    InvalidCursor,
+    InvalidTransition,
+    NotUnderTakeover,
+    OpportunityNotFound,
+    # Kevin-work exceptions
+    UnknownOpportunity,
+    RepReplyNotUnderTakeover,
+)
+from ..storage.base import MalformedCursor
 
-    return HTTPException(status_code=404, detail=detail)
+_STATUS = {
+    OpportunityNotFound: (404, "Opportunity not found"),
+    UnknownOpportunity: (404, "Opportunity not found"),
+    CaseNotFound: (404, "Case not found"),
+    NotUnderTakeover: (409, "Conversation is not under human takeover"),
+    RepReplyNotUnderTakeover: (409, "Conversation is not under human takeover"),
+    InvalidTransition: (400, "Invalid status"),
+    InvalidCursor: (400, "Invalid since cursor"),
+    MalformedCursor: (400, "Malformed cursor"),
+}
 
 
-def conflict(detail: str):
-    from fastapi import HTTPException
+def install(app: FastAPI) -> None:
+    for exc_type, (status, message) in _STATUS.items():
+        app.add_exception_handler(exc_type, _handler(status, message))
 
-    return HTTPException(status_code=409, detail=detail)
+
+def _handler(status: int, message: str):
+    async def handle(_request: Request, exc: Exception) -> JSONResponse:
+        detail = f"{message}: {exc}" if str(exc) else message
+        return JSONResponse(status_code=status, content={"detail": detail})
+
+    return handle
 
 
-def bad_request(detail: str):
-    from fastapi import HTTPException
-
+# Helper functions for raising HTTP exceptions
+def bad_request(detail: str) -> HTTPException:
     return HTTPException(status_code=400, detail=detail)
+
+
+def not_found(detail: str) -> HTTPException:
+    return HTTPException(status_code=404, detail=detail)

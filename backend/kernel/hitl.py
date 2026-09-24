@@ -66,6 +66,7 @@ REASON_COMPETITIVE = (
     "High purchase intent with competitive comparison — recommend human sales "
     "intervention"
 )
+REASON_ASSISTANT_PROPOSED = "Assistant proposed handoff"
 
 _CORPORATE_QUOTE_REQUEST = re.compile(
     r"\b(?:prepare|provide|send|issue|request|need|want|get|give|"
@@ -81,6 +82,7 @@ def evaluate(
     *,
     confidence_floor: float = ESCALATE_BELOW_CONFIDENCE,
     customer_text: str = "",
+    proposal: Optional[Any] = None,
 ) -> Optional[str]:
     """Return the escalation reason, or None when the assistant may continue.
 
@@ -89,6 +91,8 @@ def evaluate(
     escalating is not cautious, it just moves the work to a person who did not need
     to do it.
     """
+    from ..domain.detection import HandoffProposal
+
     signals = set(det.signals)
 
     # ---- Outside the assistant's authority -------------------------------
@@ -139,6 +143,16 @@ def evaluate(
         and not opp.human_takeover
     ):
         return REASON_COMPETITIVE
+
+    # ---- Assistant-proposed handoff ----------------------------------------
+    # The model can propose a handoff (e.g., customer distress), but it's declined
+    # for held conversations or when a person already owns it.
+    if proposal and isinstance(proposal, HandoffProposal) and proposal.requested:
+        if opp.qualification is not Qualification.QUALIFIED:
+            return None
+        if opp.human_takeover:
+            return None
+        return f"{REASON_ASSISTANT_PROPOSED}: {proposal.reason}"
 
     # Withdrawal is an outcome, not an escalation. Nobody needs to be paged because
     # a customer said no.

@@ -14,3 +14,18 @@ made debugging impossible before:
 
 Never imported by `domain` or `kernel`.
 """
+from .console import print_run, render
+from .recorder import RunRecorder, StepHandle
+from .run import AgentRun, Cost, LlmCall, RunStep, ToolCall
+
+__all__ = [
+    "AgentRun",
+    "Cost",
+    "LlmCall",
+    "RunRecorder",
+    "RunStep",
+    "StepHandle",
+    "ToolCall",
+    "print_run",
+    "render",
+]

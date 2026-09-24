@@ -1,61 +1,116 @@
 # -*- coding: utf-8 -*-
-"""Extraction: reading one customer message into typed observations.
+"""Extraction of intent, product, signals and concern from a customer message.
 
-Two implementations, **one protocol**:
-
-    `rules`        deterministic phrase matching. Standard library, no network.
-    `model_based`  a model call with an enum-typed structured output.
-
-They are peers, not a primary and a fallback. That framing is the whole correction:
-the previous build kept the rule-based classifiers inside an `except Exception:` on
-the model path, so the two were never required to agree on anything — and they
-diverged until the prompt was offering the model values the domain rejected, silently
-disabling three escalation triggers. A declared shared contract is what makes such a
-divergence a type error rather than a surprise in production.
-
-Every outcome reports how it was produced and whether anything went wrong, because a
-degradation nobody can see is the failure mode being designed out here.
+Two peer implementations behind one protocol: `model_based` and `rules`. They
+are peers, not a primary and a patch. The original build kept the rule-based
+classifiers as an exception handler and the two drifted until the prompt offered
+the model enum values the domain did not accept -- a defect that silently
+disabled three HITL triggers. A declared shared contract is the fix.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Literal, Optional, Protocol
 
-from ...domain.detection import Detection
-from ...observability.violations import ModelViolation
+from ...domain.detection import Detection, HandoffProposal
+from ...domain.message import Message
+from ...observability import RunRecorder
 
 
 @dataclass
 class ExtractionOutcome:
-    """What was observed, how, and what went wrong on the way.
+    """What one extraction call produced, and how.
 
-    `source` is reported on the wire as well: it is the only way a reader can tell
-    that an answer advertised as model-driven was in fact produced by a keyword list.
+    `source`, `violation` and `unavailable` exist so a caller (eventually
+    `services`) can report a degraded run without inspecting the detection for
+    clues -- exactly the distinction `docs/backend-plan.md` §7 draws between
+    "model unavailable" (`unavailable`) and "model wrong" (`violation`).
+
+    `handoff` is the model's proposal, if it made one; the kernel decides.
+    `trace` is the framework's own message list from a model run, kept opaque
+    here so the reply peer can continue the same conversation.
     """
 
     detection: Detection
-    source: str                                  # "llm" | "rules"
-    violations: list[ModelViolation] = field(default_factory=list)
-    degraded: bool = False
-    degradation_reason: Optional[str] = None
-    tool_calls: int = 0
-    rule_notes: list[str] = field(default_factory=list)
-    # Whether the degradation is the configured mode rather than a fault: the
-    # rule-based peer running because no model is configured. Chooses a log level and
-    # nothing else — the outcome still reports `degraded`, because it genuinely did
-    # take the other route. Never serialised; `interface-v1.md` is frozen.
-    by_design: bool = False
-
-    @property
-    def used_a_model(self) -> bool:
-        return self.source == "llm"
+    source: Literal["llm", "rule"]
+    violation: Optional[str] = None
+    unavailable: Optional[str] = None
+    handoff: Optional[HandoffProposal] = None
+    trace: list[Any] = field(default_factory=list)
 
 
-@runtime_checkable
 class Extractor(Protocol):
-    """The contract both implementations satisfy."""
+    def extract(
+        self,
+        text: str,
+        context: Optional[list[Message]] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
+    ) -> ExtractionOutcome: ...
+
+
+# Import rules module AFTER ExtractionOutcome is defined to avoid circular import
+from . import rules
+
+
+OFFLINE_REASON = "no model configured — rule-based extraction"
+
+
+class RuleExtractor:
+    """The offline peer: always available, never calls a model.
+
+    `offline=True` marks the step degraded. The implementation is a first-class
+    peer, not a stub — but a *run* that never reached a model did not run at
+    full capability, and `interface-v1.md` §5.7 requires that to be visible
+    rather than indistinguishable from a model-backed run.
+    """
+
+    def __init__(self, *, offline: bool = False) -> None:
+        self._offline = offline
 
     def extract(
-        self, text: str, context: Optional[list] = None
+        self,
+        text: str,
+        context: Optional[list[Message]] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
     ) -> ExtractionOutcome:
-        ...
+        if recorder is None:
+            return ExtractionOutcome(detection=rules.extract(text, context), source="rule")
+        with recorder.step("extraction", "rule") as step:
+            detection = rules.extract(text, context)
+            if self._offline:
+                step.degrade(OFFLINE_REASON)
+            else:
+                step.note(f"intent={detection.intent.value} product={detection.product.value}")
+        return ExtractionOutcome(
+            detection=detection,
+            source="rule",
+            unavailable=OFFLINE_REASON if self._offline else None,
+        )
+
+
+class ModelExtractor:
+    """The model-based peer. Falls back to the rule peer when the model is
+    unavailable or wrong, and says which."""
+
+    def __init__(self, model) -> None:
+        self._model = model
+
+    def extract(
+        self,
+        text: str,
+        context: Optional[list[Message]] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
+    ) -> ExtractionOutcome:
+        from . import model_based
+
+        return model_based.extract(text, context, model=self._model, recorder=recorder)
+
+
+def build_extractor(model=None) -> Extractor:
+    """`model=None` selects the offline (rule-based) peer, and says so on the record."""
+    if model is None:
+        return RuleExtractor(offline=True)
+    return ModelExtractor(model)

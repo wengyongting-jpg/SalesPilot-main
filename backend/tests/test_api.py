@@ -42,10 +42,20 @@ FORBIDDEN_ON_CUSTOMER_TIER = (
 def client(*, model=None):
     from fastapi.testclient import TestClient
 
+    from backend import config
     from backend.api.app import create_app
     from backend.storage.memory import InMemoryRepository
 
-    return TestClient(create_app(repository=InMemoryRepository(), model=model))
+    # Disable console trace during tests to avoid encoding issues on Windows
+    _original_trace = config.CONSOLE_TRACE
+    config.CONSOLE_TRACE = False
+
+    test_client = TestClient(create_app(repository=InMemoryRepository(), model=model))
+
+    # Restore original setting
+    config.CONSOLE_TRACE = _original_trace
+
+    return test_client
 
 
 def deep_keys(payload) -> set[str]:
@@ -434,7 +444,7 @@ class TestAdminSurface(unittest.TestCase):
                   "client_message_id": "r-1"},
         )
         self.assertEqual(200, response.status_code, response.text)
-        message = response.json()["message"]
+        message = response.json()  # Endpoint returns message dict directly
         self.assertEqual("business", message["role"])
         self.assertEqual("human", message["author"])
         self.assertEqual("human", message["generation"])

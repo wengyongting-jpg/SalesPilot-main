@@ -24,13 +24,56 @@ from __future__ import annotations
 from typing import Optional
 
 from ..domain.decision import NextBestAction
-from ..domain.enums import ReplyMode
+from ..domain.enums import Intent, OpportunityState, Priority, Product, ReplyMode, Signal
 from . import schema
 
 # A concern is model-authored free text that re-enters a later prompt, which makes it
 # a prompt-injection path (see `docs/backend-plan.md` §12.1). Capping its length and
 # flattening its whitespace removes the two cheap ways to break out of a data section.
 MAX_CONCERN_CHARS = 160
+
+# ---- Safety checks: prevent internal vocabulary leakage to customers --------
+
+# Generated from the enums, not restated, so a new state or signal is covered
+# automatically instead of needing a second edit here.
+_ENUM_TOKENS: tuple[str, ...] = tuple(
+    sorted(
+        {member.value for member in OpportunityState}
+        | {member.value for member in Signal}
+        | {member.value for member in Priority}
+    )
+)
+
+_UNAMBIGUOUS_TOKENS: tuple[str, ...] = ("next best action", "HITL")
+_PROMPT_ONLY_TOKENS: tuple[str, ...] = ("score", "priority", "qualification", "escalat")
+_FORBIDDEN_TOKENS: tuple[str, ...] = _ENUM_TOKENS + _UNAMBIGUOUS_TOKENS + _PROMPT_ONLY_TOKENS
+
+
+def assert_customer_safe(text: str) -> None:
+    """Raise if text contains internal state names, signals, scores, or priority bands.
+
+    Used on developer-authored prompts before they are sent to the model.
+    """
+    hits = [token for token in _FORBIDDEN_TOKENS if token in text]
+    if hits:
+        raise ValueError(
+            "customer-facing prompt leaks internal vocabulary: " + ", ".join(hits)
+        )
+
+
+def assert_reply_safe(text: str) -> None:
+    """Raise if the model's reply contains internal state vocabulary.
+
+    Narrower check on the way out: only unambiguous internal terms are forbidden.
+    """
+    hits = [token for token in (_ENUM_TOKENS + _UNAMBIGUOUS_TOKENS) if token in text]
+    if hits:
+        raise ValueError(
+            "model reply leaks internal vocabulary: " + ", ".join(hits)
+        )
+
+
+# ---- ReplyMode-based prompt construction -----------------------------------
 
 _COMPLIANCE_RULES = (
     "Use ONLY the approved facts supplied below. Never invent a premium, a benefit, "
@@ -216,6 +259,14 @@ def data_section(label: str, content: str) -> str:
     which is the most that prompt-level mitigation can honestly claim.
     """
     return f"[DATA: {label}]\n{content}\n[END DATA]"
+
+
+def trim_history(messages: list) -> list:
+    """Keep recent conversation history within token budget.
+
+    Simple implementation: keep last 10 messages to avoid context overflow.
+    """
+    return messages[-10:] if len(messages) > 10 else messages
 
 
 def build_reply_prompt(

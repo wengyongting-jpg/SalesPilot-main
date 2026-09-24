@@ -18,6 +18,7 @@ from typing import Optional
 
 from ....domain.detection import Detection
 from ....domain.enums import Intent, Product, Signal
+from ....observability import RunRecorder
 from .. import ExtractionOutcome
 from . import intent as intent_rules
 from . import product as product_rules
@@ -33,11 +34,23 @@ class RuleExtractor:
     """Phrase matching over intent, product and signals."""
 
     def extract(
-        self, text: str, context: Optional[list] = None
+        self,
+        text: str,
+        context: Optional[list] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
     ) -> ExtractionOutcome:
-        intent = intent_rules.detect(text, context=context)
-        product = product_rules.detect(text, context=context)
-        signals, concerns = signal_rules.detect(text, intent, product, context=context)
+        # Record extraction step if recorder is provided
+        if recorder:
+            with recorder.step("extraction", "rule") as step:
+                intent = intent_rules.detect(text, context=context)
+                product = product_rules.detect(text, context=context)
+                signals, concerns = signal_rules.detect(text, intent, product, context=context)
+                step.note(f"intent={intent.value} product={product.value} signals={len(signals)}")
+        else:
+            intent = intent_rules.detect(text, context=context)
+            product = product_rules.detect(text, context=context)
+            signals, concerns = signal_rules.detect(text, intent, product, context=context)
 
         solicitation = signal_rules.is_solicitation(text)
         detection = Detection(
@@ -58,3 +71,10 @@ class RuleExtractor:
             solicitation=solicitation,
         )
         return ExtractionOutcome(detection=detection, source="rules")
+
+
+def extract(text: str, context: Optional[list] = None) -> Detection:
+    """Convenience function for rule-based extraction."""
+    extractor = RuleExtractor()
+    outcome = extractor.extract(text, context=context)
+    return outcome.detection

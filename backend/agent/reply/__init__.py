@@ -1,37 +1,28 @@
 # -*- coding: utf-8 -*-
-"""Composing the customer-facing reply.
+"""Customer-facing reply composition.
 
-Two implementations, **one protocol** — the same correction as `extraction`:
-
-    `template`     deterministic wording. Standard library, no network.
-    `model_based`  a model call, grounded in the supplied facts.
-
-They are peers. `model_based` does delegate to `template` when a provider fails, but
-that is a *declared* degradation between two implementations of one contract, not the
-untyped `except Exception:` that let the frozen build's two paths drift apart. The
-difference is that the delegation is reported: the outcome says it degraded and why,
-and the message it produces is marked `generation="template"` so nobody downstream
-believes a model wrote it.
-
-What a composer is given: the approved facts, the customer-safe guidance for the
-kernel's reply mode, the customer's own sanitised concern. What it is never given:
-the state, the signals, the score, the priority band, or the next best action's
-wording. See `docs/backend-plan.md` §3 red line 3.
+Two peer implementations behind one protocol: `model_based` and `template`. The
+template composer marks its output `generation="template"` so a reader is never
+misled into thinking a model produced wording that a template did.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol
 
-from ...domain.decision import NextBestAction
-from ...domain.enums import Generation
+from ...domain.detection import RetrievalResult
+from ...domain.enums import ReplyMode
+from ...domain.message import Generation, Message
+from ...kernel.next_best_action import NextBestAction
+from ...observability import RunRecorder
 from ...observability.violations import ModelViolation
+
+STEP_NAME = "response_generation"
 
 
 @dataclass
 class ReplyRequest:
     """Everything a composer may see. Deliberately a closed list."""
-
     facts: list[str]
     action: NextBestAction
     customer_name: str = ""
@@ -50,17 +41,88 @@ class ReplyOutcome:
     degradation_reason: Optional[str] = None
     violations: list[ModelViolation] = field(default_factory=list)
     history: list[Any] = field(default_factory=list)
-    # What the composing call consumed, for `services` to record. None from the
-    # template peer, where there is genuinely nothing to account for.
-    usage: Optional[Any] = None
-    # Whether the degradation is the configured mode rather than a fault: the template
-    # peer composing because no model is configured. Chooses a log level and nothing
-    # else. Never serialised; `interface-v1.md` is frozen.
     by_design: bool = False
-    disclaimer_appended: bool = False
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
-@runtime_checkable
 class Composer(Protocol):
-    def compose(self, request: ReplyRequest) -> ReplyOutcome:
-        ...
+    def compose(self, request: ReplyRequest) -> ReplyOutcome: ...
+
+
+OFFLINE_REASON = "no model configured — template reply"
+
+
+# Import after dataclass definitions to avoid circular import
+from . import model_based as _model_based
+from . import template as _template
+
+
+class TemplateComposer:
+    """The offline peer: always available, never calls a model.
+
+    `offline=True` marks the step degraded, for the reason given on
+    `extraction.RuleExtractor`: the peer is first class, the *run* is not.
+    """
+
+    def __init__(self, *, offline: bool = False) -> None:
+        self._offline = offline
+
+    def compose(
+        self,
+        instruction: str,
+        retrieval: RetrievalResult,
+        *,
+        withdrawal: bool = False,
+        takeover: bool = False,
+        escalate: bool = False,
+        greeting: bool = False,
+        recorder: Optional[RunRecorder] = None,
+        customer_message: Optional[str] = None,
+    ) -> Message:
+        return _template.compose(
+            retrieval=retrieval,
+            withdrawal=withdrawal,
+            takeover=takeover,
+            escalate=escalate,
+            greeting=greeting,
+            recorder=recorder,
+            degraded_reason=OFFLINE_REASON if self._offline else None,
+        )
+
+
+class ModelComposer:
+    """The model-based peer. Falls back to the template peer when the model is
+    unavailable, and says so on the run record."""
+
+    def __init__(self, model) -> None:
+        self._model = model
+
+    def compose(
+        self,
+        instruction: str,
+        retrieval: RetrievalResult,
+        *,
+        withdrawal: bool = False,
+        takeover: bool = False,
+        escalate: bool = False,
+        greeting: bool = False,
+        recorder: Optional[RunRecorder] = None,
+        customer_message: Optional[str] = None,
+    ) -> Message:
+        return _model_based.compose(
+            model=self._model,
+            instruction=instruction,
+            retrieval=retrieval,
+            withdrawal=withdrawal,
+            takeover=takeover,
+            escalate=escalate,
+            greeting=greeting,
+            recorder=recorder,
+        )
+
+
+def build_composer(model=None) -> Composer:
+    """Build the appropriate composer based on model availability."""
+    if model is None:
+        return TemplateComposer(offline=True)
+    return ModelComposer(model)

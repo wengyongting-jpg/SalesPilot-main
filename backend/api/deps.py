@@ -10,10 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from fastapi import Request
+
 from ..services.analytics import AnalyticsService
 from ..services.cases import CaseService
 from ..services.conversation import ConversationService
 from ..services.rep_reply import RepReplyService
+from ..storage.base import Repository
 
 
 @dataclass
@@ -29,10 +32,16 @@ class Services:
         cls,
         repository,
         *,
-        model=None,
         conversation: Optional[ConversationService] = None,
     ) -> "Services":
-        conversation = conversation or ConversationService(repository, model=model)
+        from ..agent.extraction.rules import RuleExtractor
+        from ..agent.reply.template import TemplateComposer
+
+        conversation = conversation or ConversationService(
+            repository,
+            extractor=RuleExtractor(),
+            composer=TemplateComposer(),
+        )
         return cls(
             repo=repository,
             conversation=conversation,
@@ -42,5 +51,18 @@ class Services:
         )
 
 
-def services_of(request) -> Services:
+def services_of(request: Request) -> Services:
     return request.app.state.services
+
+
+# Backward compatibility aliases for Main's route files
+def get_repo(request: Request) -> Repository:
+    return services_of(request).repo
+
+
+def get_service(request: Request) -> ConversationService:
+    return services_of(request).conversation
+
+
+# Alias for Kevin-work's app.py
+services = services_of

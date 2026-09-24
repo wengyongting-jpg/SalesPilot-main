@@ -32,10 +32,9 @@ router = APIRouter(tags=["customer"])
 def post_message(payload: IncomingMessage, request: Request) -> CustomerReply:
     """Process one customer message through the full pipeline.
 
-    Supplying `client_message_id` makes the call idempotent: replaying the same key on
-    the same conversation returns the stored response without re-running anything.
-    Omitting it leaves the original non-idempotent behaviour, where a retry after a
-    timeout would advance the message count and inflate the engagement evidence.
+    Supplying `client_message_id` makes the call idempotent: replaying the same id for
+    the same customer returns the stored response without re-running the pipeline. That
+    is how a retry after a timeout remains safe.
     """
     try:
         result = services_of(request).conversation.handle_customer_message(
@@ -45,7 +44,8 @@ def post_message(payload: IncomingMessage, request: Request) -> CustomerReply:
             client_message_id=payload.client_message_id,
         )
     except QuestionAnswerTooLong as error:
-        raise errors.bad_request(str(error)) from error
+        raise errors.bad_request(str(error))
+
     return project_reply(result.to_dict())
 
 
@@ -63,10 +63,12 @@ def get_conversation(
     repo = services_of(request).repo
     opportunity = repo.get_opportunity(conversation_id, history_limit=0)
     if opportunity is None:
-        raise errors.not_found("Conversation not found")
+        raise errors.not_found(f"Conversation {conversation_id} not found")
+
+    from ...services import opportunities
 
     try:
-        messages = repo.messages_since(conversation_id, cursor=since)
+        messages = opportunities.messages_since(opportunity, since)
     except MalformedCursor as error:
         raise errors.bad_request(str(error))
 
@@ -77,8 +79,8 @@ def get_conversation(
         human_takeover=opportunity.human_takeover,
         messages=[project_message(message_to_dict(m)) for m in messages],
         quick_replies=(
-            [QuickReply(id="handoff_confirm", label="Confirm"),
-             QuickReply(id="handoff_cancel", label="Cancel")]
+            [QuickReply(id="handoff-confirm", label="Confirm"),
+             QuickReply(id="handoff-cancel", label="Cancel")]
             if opportunity.pending_handoff_reason else []
         ),
         customer_question=opportunity_to_dict(opportunity)["customer_question"],

@@ -14,7 +14,7 @@ from typing import Optional
 
 from .. import __version__, config
 from ..observability.logging import get_logger
-from .deps import Services
+from .deps import Services, services
 
 
 def create_app(
@@ -44,8 +44,13 @@ def create_app(
         ),
     )
     app.state.services = Services.build(
-        repository, model=model, conversation=conversation
+        repository, conversation=conversation
     )
+
+    # Install exception handlers
+    from . import errors
+    errors.install(app)
+
     _allow_development_origins(app)
 
     app.include_router(system.router)

@@ -1,95 +1,45 @@
 # -*- coding: utf-8 -*-
-"""The agent run record: what the agent did, and whether any of it went wrong.
+"""The agent run record: `interface-v1.md` §5.3, field for field.
 
-Wire shape: `docs/api/interface-v1.md` §5.3. Admin tier only — under §2 the customer
-response has no shape for any of this.
+Plain dataclasses, standard library only. Nothing here knows about the agent
+framework — `backend.agent.telemetry` translates framework objects into these
+types, so the record shape stays stable if the framework is ever replaced.
 
-`status` carries the distinction the whole package exists for:
-
-    ok          everything ran as intended
-    degraded    a step produced a usable result by a worse route. Two causes, and the
-                record keeps them apart: the model was unavailable, or the model was
-                wrong. The second was invisible in the previous build.
-    error       an exception. A bug, not a provider hiccup.
-
-An error outranks a degradation when the run is summarised, because a reader who sees
-"degraded" will look at the provider, and a reader who sees "error" will look at the
-code. Sending them to the wrong place is the cost of blurring the two.
+`totals` is computed from the parts, never stored, so it cannot disagree with
+them. `status` is derived from the steps for the same reason.
 """
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from decimal import Decimal
+from typing import Literal, Optional
 
-from .pricing import Money, zero
-from .violations import ModelViolation
-
-
-class RunStatus(str, Enum):
-    OK = "ok"
-    DEGRADED = "degraded"
-    ERROR = "error"
-
-    @property
-    def severity(self) -> int:
-        return {"ok": 0, "degraded": 1, "error": 2}[self.value]
+StepKind = Literal["llm", "rule", "retrieval", "tool"]
+Status = Literal["ok", "degraded", "error"]
 
 
-class StepKind(str, Enum):
-    """What kind of work a step was.
+@dataclass(frozen=True)
+class Cost:
+    amount: Decimal
+    currency: str = "USD"
 
-    `TOOL` is reserved for a call the **model chose** to make. Fixed pipeline
-    retrieval is `RETRIEVAL` and must never be counted as a tool call — see
-    `interface-v1.md` §1.1 rule 2, which exists because inflating that number is an
-    easy way to make a dashboard look more agentic than the system is.
-    """
-
-    LLM = "llm"
-    RULE = "rule"
-    RETRIEVAL = "retrieval"
-    TOOL = "tool"
+    def to_dict(self) -> dict:
+        return {"amount": float(round(self.amount, 6)), "currency": self.currency}
 
 
-@dataclass
+@dataclass(frozen=True)
 class Content:
-    """A prompt or a model output: always its length, sometimes its text.
-
-    `chars` is the **true** length even when the text is withheld or truncated, so a
-    reader can tell that something was cut rather than that it was short.
-    """
+    """Length is always reported; the text itself may be withheld (`None`)."""
 
     chars: int
     content: Optional[str] = None
 
     def to_dict(self) -> dict:
-        return {"chars": self.chars, "content": self.content}
-
-
-@dataclass
-class RunStep:
-    index: int
-    name: str
-    kind: StepKind
-    duration_ms: int
-    status: RunStatus = RunStatus.OK
-    detail: Optional[str] = None
-    # Whether a degradation is the configured mode rather than a fault. **Not
-    # serialised**: `interface-v1.md` is frozen, so no field may be added to the wire.
-    # This exists only to choose a log level - see `logging._level_for`.
-    by_design: bool = False
-
-    def to_dict(self) -> dict:
-        return {
-            "index": self.index,
-            "name": self.name,
-            "kind": self.kind.value,
-            "duration_ms": self.duration_ms,
-            "status": self.status.value,
-            "detail": self.detail,
-        }
+        payload: dict = {"chars": self.chars}
+        if self.content is not None:
+            payload["content"] = self.content
+        return payload
 
 
 @dataclass
@@ -100,16 +50,16 @@ class LlmCall:
     duration_ms: int
     prompt_tokens: int
     completion_tokens: int
-    cost: Money
     input: Content
     output: Content
+    cost: Optional[Cost] = None
 
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "index": self.index,
             "purpose": self.purpose,
             "model": self.model,
@@ -117,20 +67,24 @@ class LlmCall:
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
-            "cost": self.cost.to_dict(),
             "input": self.input.to_dict(),
             "output": self.output.to_dict(),
         }
+        if self.cost is not None:
+            payload["cost"] = self.cost.to_dict()
+        return payload
 
 
 @dataclass
-class ToolCallRecord:
-    """A call the model chose to make."""
+class ToolCall:
+    """A call the model chose to make. Retrieval by the pipeline is never one."""
 
     index: int
     name: str
     arguments: dict
     result_chars: int
+    duration_ms: int
+    status: Status = "ok"
 
     def to_dict(self) -> dict:
         return {
@@ -138,93 +92,115 @@ class ToolCallRecord:
             "name": self.name,
             "arguments": self.arguments,
             "result_chars": self.result_chars,
+            "duration_ms": self.duration_ms,
+            "status": self.status,
         }
 
 
 @dataclass
+class RunStep:
+    index: int
+    name: str
+    kind: StepKind
+    duration_ms: int
+    status: Status = "ok"
+    # Human-readable outcome: a state transition, a score band, a hold reason,
+    # or — for a degraded step — the reason it degraded, naming the offending
+    # value when the model was wrong.
+    detail: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        payload = {
+            "index": self.index,
+            "name": self.name,
+            "kind": self.kind,
+            "duration_ms": self.duration_ms,
+            "status": self.status,
+        }
+        if self.detail is not None:
+            payload["detail"] = self.detail
+        return payload
+
+
+@dataclass
 class AgentRun:
+    run_id: str
     opportunity_id: str
-    run_id: str = field(default_factory=lambda: f"ar-{uuid.uuid4().hex[:8]}")
-    client_message_id: Optional[str] = None
-    trigger: str = "customer_message"
-    customer_message_count: int = 0
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    duration_ms: int = 0
-    status: RunStatus = RunStatus.OK
+    client_message_id: Optional[str]
+    trigger: str
+    customer_message_count: int
+    started_at: datetime
+    finished_at: datetime
+    duration_ms: int
     steps: list[RunStep] = field(default_factory=list)
     llm_calls: list[LlmCall] = field(default_factory=list)
-    tool_calls: list[ToolCallRecord] = field(default_factory=list)
-    violations: list[ModelViolation] = field(default_factory=list)
-
-    # ---- Derived totals -------------------------------------------------
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
     @property
-    def degraded_by_design(self) -> bool:
-        """True when this run degraded only in ways that were the configured mode.
-
-        The distinction the log level needs. Running with no model configured degrades
-        every run — that is the documented default, not a fault, and reporting each one
-        at WARNING means the default mode looks broken and real warnings are buried in
-        a stream of expected ones.
-
-        Deliberately **all** rather than **any**: one genuine fault in a run makes the
-        whole run worth a warning, even alongside expected offline degradations.
-        """
-        degraded = [step for step in self.steps if step.status is RunStatus.DEGRADED]
-        return bool(degraded) and all(step.by_design for step in degraded)
+    def status(self) -> Status:
+        statuses = {step.status for step in self.steps}
+        if "error" in statuses:
+            return "error"
+        if "degraded" in statuses:
+            return "degraded"
+        return "ok"
 
     @property
     def total_tokens(self) -> int:
         return sum(call.total_tokens for call in self.llm_calls)
 
     @property
-    def total_cost(self) -> Money:
-        total = zero()
-        for call in self.llm_calls:
-            total = total + call.cost
-        return total
+    def total_cost(self) -> Optional[Cost]:
+        priced = [call.cost for call in self.llm_calls if call.cost is not None]
+        if not priced:
+            return None
+        return Cost(amount=sum(cost.amount for cost in priced), currency=priced[0].currency)
 
     @property
-    def models_used(self) -> list[str]:
-        seen: list[str] = []
-        for call in self.llm_calls:
-            if call.model not in seen:
-                seen.append(call.model)
-        return seen
+    def degraded_reasons(self) -> list[str]:
+        return [step.detail for step in self.steps if step.status == "degraded" and step.detail]
 
     def totals(self) -> dict:
-        return {
+        payload = {
             "agent_step_count": len(self.steps),
             "llm_call_count": len(self.llm_calls),
-            # Model-selected calls only.
             "tool_call_count": len(self.tool_calls),
             "total_tokens": self.total_tokens,
-            "cost": self.total_cost.to_dict(),
         }
+        cost = self.total_cost
+        if cost is not None:
+            payload["cost"] = cost.to_dict()
+        return payload
 
-    def to_dict(self) -> dict:
+    def to_dict(self, *, include_content: bool) -> dict:
+        llm_calls = self.llm_calls
+        if not include_content:
+            llm_calls = [
+                LlmCall(
+                    index=call.index,
+                    purpose=call.purpose,
+                    model=call.model,
+                    duration_ms=call.duration_ms,
+                    prompt_tokens=call.prompt_tokens,
+                    completion_tokens=call.completion_tokens,
+                    input=Content(chars=call.input.chars),
+                    output=Content(chars=call.output.chars),
+                    cost=call.cost,
+                )
+                for call in self.llm_calls
+            ]
         return {
             "run_id": self.run_id,
             "opportunity_id": self.opportunity_id,
             "client_message_id": self.client_message_id,
             "trigger": self.trigger,
             "customer_message_count": self.customer_message_count,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "started_at": self.started_at.isoformat(),
+            "finished_at": self.finished_at.isoformat(),
             "duration_ms": self.duration_ms,
-            "status": self.status.value,
+            "status": self.status,
             "steps": [step.to_dict() for step in self.steps],
-            "llm_calls": [call.to_dict() for call in self.llm_calls],
+            "llm_calls": [call.to_dict() for call in llm_calls],
             "tool_calls": [call.to_dict() for call in self.tool_calls],
-            "violations": [
-                {
-                    "field": violation.field,
-                    "value": violation.value,
-                    "allowed": violation.allowed,
-                    "message": violation.message,
-                }
-                for violation in self.violations
-            ],
             "totals": self.totals(),
         }
