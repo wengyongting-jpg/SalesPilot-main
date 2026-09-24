@@ -57,7 +57,7 @@ FRAMEWORK_OWNER = "agent"
 # P5: the repository's write surface, and who may call it.
 STORAGE_WRITE_METHODS = {
     "upsert_opportunity", "delete_opportunity", "add_case", "update_case",
-    "save_receipt", "save_run",
+    "save_receipt", "save_run", "save_turn",
 }
 STORAGE_WRITERS = {"services", "storage"}
 

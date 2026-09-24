@@ -1,11 +1,8 @@
 -- SalesPilot backend schema.
 --
--- Messages, score history and state history are normalised into their own tables
--- rather than stored as JSON blobs on the opportunity. That costs a little writing
--- and buys two things the interface explicitly asks for: an incremental `?since=`
--- read (interface-v1 section 5.6) and a bounded history read (gap register item 12).
--- With JSON columns both would mean loading the whole conversation to return three
--- rows of it.
+-- Messages, score history and state history have tables for incremental and indexed
+-- reads. The opportunity payload remains the transcript source of truth; the
+-- `messages` rows are maintained as a searchable projection for scoped recall.
 --
 -- Everything else that is genuinely a value object -- the scorecard, signal lists,
 -- an agent run payload -- stays as JSON, because it is always read whole.
@@ -63,6 +60,15 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_id ON messages(opportunity_id, id);
+CREATE INDEX IF NOT EXISTS idx_messages_opportunity_seq ON messages(opportunity_id, seq DESC);
+
+CREATE TABLE IF NOT EXISTS conversation_memory (
+    opportunity_id TEXT PRIMARY KEY,
+    version        INTEGER NOT NULL DEFAULT 1,
+    payload        TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS score_history (
     opportunity_id TEXT NOT NULL,

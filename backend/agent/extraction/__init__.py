@@ -38,6 +38,7 @@ class ExtractionOutcome:
     unavailable: Optional[str] = None
     handoff: Optional[HandoffProposal] = None
     trace: list[Any] = field(default_factory=list)
+    memory: Optional[dict[str, Any]] = None
 
 
 @runtime_checkable
@@ -48,6 +49,10 @@ class Extractor(Protocol):
         context: Optional[list[Message]] = None,
         *,
         recorder: Optional[RunRecorder] = None,
+        memory: Optional[dict[str, Any]] = None,
+        opportunity_id: Optional[str] = None,
+        history_search=None,
+        opportunity=None,
     ) -> ExtractionOutcome: ...
 
 
@@ -76,6 +81,10 @@ class RuleExtractor:
         context: Optional[list[Message]] = None,
         *,
         recorder: Optional[RunRecorder] = None,
+        memory: Optional[dict[str, Any]] = None,
+        opportunity_id: Optional[str] = None,
+        history_search=None,
+        opportunity=None,
     ) -> ExtractionOutcome:
         if recorder is None:
             return ExtractionOutcome(detection=rules.extract(text, context), source="rules")
@@ -105,10 +114,18 @@ class ModelExtractor:
         context: Optional[list[Message]] = None,
         *,
         recorder: Optional[RunRecorder] = None,
+        memory: Optional[dict[str, Any]] = None,
+        opportunity_id: Optional[str] = None,
+        history_search=None,
+        opportunity=None,
     ) -> ExtractionOutcome:
         from . import model_based
 
-        return model_based.extract(text, context, model=self._model, recorder=recorder)
+        return model_based.extract(
+            text, context, model=self._model, recorder=recorder,
+            memory=memory, opportunity_id=opportunity_id,
+            history_search=history_search, opportunity=opportunity,
+        )
 
 
 def build_extractor(model=None) -> Extractor:

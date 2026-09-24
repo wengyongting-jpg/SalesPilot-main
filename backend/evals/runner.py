@@ -14,6 +14,7 @@ from ..agent.reply.template import _MONEY
 from ..knowledge import loader
 from ..services.conversation import ConversationService
 from ..storage.memory import InMemoryRepository
+from ..storage.sqlite import SqliteRepository
 from .cases import CASES
 
 
@@ -60,13 +61,16 @@ def _usage(payload: dict) -> dict:
     run = payload.get("agent_run") or {}
     totals = run.get("totals") or {}
     cost = totals.get("cost") or {}
+    llm_calls = run.get("llm_calls") or []
     return {
         "status": run.get("status"),
         "llm_calls": totals.get("llm_call_count", 0),
         "tool_calls": totals.get("tool_call_count", 0),
         "tokens": totals.get("total_tokens", 0),
         "cost_usd": cost.get("amount", 0.0),
-        "pricing_known": cost.get("pricing_known", True),
+        "pricing_known": cost.get(
+            "pricing_known", all(call.get("cost") is not None for call in llm_calls)
+        ),
     }
 
 
@@ -135,9 +139,12 @@ def _redact(value: Any, secret: str) -> Any:
 
 
 def run_suite(*, use_model: bool, selected: set[str] | None = None,
+              storage: str = "memory",
               max_cases: int = 20, max_turns: int = 67,
               max_model_calls: int = 160, max_cost_usd: float = 1.0,
               attempt: int = 1) -> dict[str, Any]:
+    if storage not in {"memory", "sqlite"}:
+        raise ValueError("storage must be 'memory' or 'sqlite'")
     built = model_factory.build() if use_model else None
     if use_model and (built is None or built.is_offline):
         reason = built.reason if built is not None else "model construction failed"
@@ -145,11 +152,13 @@ def run_suite(*, use_model: bool, selected: set[str] | None = None,
     model = built.model if built is not None else None
     disclaimer = loader.load().disclaimer
     secret = config.LLM_API_KEY or ""
+    repository = InMemoryRepository() if storage == "memory" else SqliteRepository(":memory:")
     chosen = [case for case in CASES if selected is None or case["id"] in selected]
     chosen = chosen[:max_cases]
     report: dict[str, Any] = {
         "started_at": datetime.now().astimezone().isoformat(),
         "mode": "model" if use_model else "offline",
+        "storage": storage,
         "attempt": attempt,
         "provider": built.spec.provider if built is not None else "offline",
         "model": built.spec.model_name if built is not None else None,
@@ -186,7 +195,7 @@ def run_suite(*, use_model: bool, selected: set[str] | None = None,
         if reason := budget_reason(before_turn=True):
             report["stopped_reason"] = reason
             break
-        service = ConversationService(InMemoryRepository(), model=model, trace=False)
+        service = ConversationService(repository, model=model, trace=False)
         item = {"id": case["id"], "name": case["name"], "attempt": attempt,
                 "passed": True, "turns": [], "errors": []}
         last_labels: dict = {}
@@ -242,12 +251,15 @@ def run_suite(*, use_model: bool, selected: set[str] | None = None,
             break
     report["totals"]["cost_usd"] = round(report["totals"]["cost_usd"], 8)
     report["finished_at"] = datetime.now().astimezone().isoformat()
+    repository.close()
     return _redact(report, secret)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run SalesPilot multi-turn evaluations")
     parser.add_argument("--model", action="store_true", help="use the configured live model")
+    parser.add_argument("--storage", choices=("memory", "sqlite"), default="memory",
+                        help="repository used for the suite (default: memory)")
     parser.add_argument("--case", action="append", dest="cases")
     parser.add_argument("--exclude-case", action="append", dest="excluded_cases")
     parser.add_argument("--max-cases", type=int, default=20)
@@ -259,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     selected = set(args.cases) if args.cases else {case["id"] for case in CASES}
     selected -= set(args.excluded_cases or [])
-    report = run_suite(use_model=args.model, selected=selected,
+    report = run_suite(use_model=args.model, selected=selected, storage=args.storage,
                        max_cases=args.max_cases, max_turns=args.max_turns,
                        max_model_calls=args.max_model_calls,
                        max_cost_usd=args.max_cost_usd, attempt=args.attempt)

@@ -558,6 +558,30 @@ class TestPersistenceAcrossARestart(unittest.TestCase):
         self.assertEqual(first.to_dict(), replay.to_dict())
         svc.repo.close()
 
+    def test_handoff_confirmation_survives_a_restart(self):
+        svc = self._service()
+        send(svc, "I want to speak to a human agent", key="offer")
+        svc.repo.close()
+
+        svc = self._service()
+        self.assertIsNotNone(svc.repo.get_opportunity("C-1").pending_handoff_reason)
+        result = send(svc, "Confirm", key="confirm")
+        self.assertIsNotNone(svc.repo.active_case_for("C-1"))
+        self.assertTrue(result.opportunity.human_takeover)
+        svc.repo.close()
+
+    def test_handoff_cancellation_survives_a_restart(self):
+        svc = self._service()
+        send(svc, "I want to speak to a human agent", key="offer")
+        svc.repo.close()
+
+        svc = self._service()
+        result = send(svc, "Cancel", key="cancel")
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+        self.assertIsNone(result.opportunity.pending_handoff_reason)
+        self.assertFalse(result.opportunity.human_takeover)
+        svc.repo.close()
+
 
 class TestOnlyServicesWritesStorage(unittest.TestCase):
     """§4 rule: `services` is the only package that writes through a repository.
@@ -568,7 +592,7 @@ class TestOnlyServicesWritesStorage(unittest.TestCase):
 
     WRITE_METHODS = (
         "upsert_opportunity", "delete_opportunity", "add_case", "update_case",
-        "save_message_receipt", "save_agent_run",
+        "save_message_receipt", "save_agent_run", "save_turn",
     )
 
     def test_no_package_outside_services_calls_a_write_method(self):

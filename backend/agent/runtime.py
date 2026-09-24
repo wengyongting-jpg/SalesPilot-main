@@ -63,7 +63,7 @@ from .usage import ModelUsage, from_result
 # `docs/v0.0/backend/backend-plan.md` §12.3, where the unbounded version is *cheaper* at ten turns
 # and six times the price by three hundred. Treated as an invariant, not a constant to
 # tune casually: `backend/tests/test_agent_runtime.py` asserts the bound.
-CONTEXT_WINDOW = 6
+CONTEXT_WINDOW = policy.MEMORY_WINDOW_MESSAGES
 
 # A runaway tool loop costs O(k squared): at fifty calls one message runs to 256,000
 # input tokens. Capped, and checked before a request is sent so a breach costs nothing.

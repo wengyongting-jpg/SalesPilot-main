@@ -1,8 +1,8 @@
 {
   "eval_suite": "caresure-conversation-behavioural-evals",
   "version": "1.0",
-  "generated": "2026-09-23",
-  "purpose": "Portable, black-box behavioural scenarios for CareSure's customer chat pipeline. Written against the frozen customer HTTP contract (docs/v0.0/api/interface-v1.md) so they can be replayed against this backend or a different implementation of the same contract for parity/regression checking.",
+  "generated": "2026-09-25",
+  "purpose": "Portable, black-box behavioural scenarios for CareSure's customer chat pipeline. Checks the current customer HTTP response allowlist while retaining the established behavioural, lifecycle and adversarial cases.",
   "target_contract": {
     "protocol": "HTTP",
     "endpoint": "POST /api/messages",
@@ -15,19 +15,25 @@
     },
     "response_shape": {
       "reply": "string",
-      "generation": "\"llm\" | \"template\" | \"human\" | null",
-      "product": "string | null — one of essential, family, plus, corporate, unknown",
-      "facts": "string[]",
+      "message": "object | null; {id, ts, role, author, rep_name, generation, text, client_message_id}",
+      "facts": "string[] — approved customer-facing product facts",
       "quick_replies": "[{id: string, label: string}]",
+      "customer_question": "{field, prompt, options:[{id, label}], allow_other} | null",
       "client_message_id": "string | null",
       "human_takeover": "boolean"
     },
     "notes": [
       "A scenario's turns share one customer_id (the same conversation); the first turn may send customer_id: \"\" and capture the id the backend assigns for use on later turns.",
-      "Fields NOT in response_shape (opportunity state, score, signals, priority, next_best_action, case, retrieval confidence, telemetry) must never appear on this endpoint by design — see global_invariants."
+      "Only the listed top-level fields may appear. Product, state, score, signals, priority, next_best_action, case, retrieval confidence and telemetry are never returned on this endpoint; generation is nested in message."
     ]
   },
   "global_invariants": [
+    {
+      "id": "customer-response-allowlist",
+      "description": "The HTTP customer response must match backend/api/schemas/customer.py and exclude sales intelligence.",
+      "applies_to": "every successful scenario response, top-level response and nested message",
+      "check": "only current customer reply and message fields are present"
+    },
     {
       "id": "no-internal-vocabulary-leak",
       "description": "The customer-facing `reply` must never contain an internal state, signal, or priority-band value verbatim — the concrete defect this rebuild's `assert_customer_safe`/`assert_reply_safe` exist to catch (see backend/agent/policy.py).",
@@ -52,7 +58,7 @@
       "description": "Any reply quoting a premium must carry the demo disclaimer verbatim, never truncated or hidden (docs/v0.0/product/product.md compliance red line). Scoped to premium specifically, not any dollar figure: a coverage limit or deductible (also a 'S$...' figure) does not require this disclaimer by design, only a premium quote does.",
       "applies_to": "every scenario's every turn, field: response.reply",
       "check": "if reply (case-insensitively) contains 'premium' and matches /S\\$\\s?[\\d,]+/ then reply_contains",
-      "value": "All premiums are fictional indicative rates for the SalesPilot demo and do not represent actual insurance quotations. Final premiums are subject to age, underwriting, plan selection and insurer assessment."
+      "value": "All premiums shown are fictional indicative rates for the SalesPilot demo and do not represent actual insurance quotations. Final premiums are subject to age, underwriting, plan selection and insurer assessment."
     },
     {
       "id": "no-agent-role",
@@ -86,9 +92,9 @@
           "send": { "text": "How much is Essential?" },
           "expect": {
             "human_takeover": false,
-            "product": "essential",
             "reply_contains_any": ["S$", "premium"]
-          }
+          },
+          "admin_check": {"expect": {"product": "essential"}}
         }
       ]
     },
@@ -101,9 +107,9 @@
           "send": { "text": "How do I submit a claim for the Essential plan?" },
           "expect": {
             "human_takeover": false,
-            "product": "essential",
             "reply_contains_any": ["claim", "Claim"]
-          }
+          },
+          "admin_check": {"expect": {"product": "essential"}}
         }
       ]
     },
@@ -114,10 +120,8 @@
       "turns": [
         {
           "send": { "text": "Am I eligible for the Plus plan as a PR?" },
-          "expect": {
-            "human_takeover": false,
-            "product": "plus"
-          }
+          "expect": {"human_takeover": false},
+          "admin_check": {"expect": {"product": "plus"}}
         }
       ]
     },
@@ -128,57 +132,72 @@
       "turns": [
         {
           "send": { "text": "Do you have a plan for a small company with 15 staff?" },
-          "expect": {
-            "human_takeover": false,
-            "product": "corporate"
-          }
+          "expect": {"human_takeover": false},
+          "admin_check": {"expect": {"product": "corporate"}}
         }
       ]
     },
     {
       "id": "escalation-human-request",
       "category": "escalation",
-      "description": "An explicit request for a person must always hand over, regardless of anything else in the message.",
+      "description": "An explicit request for a person must offer customer-confirmed handoff, then create a case only after typed confirmation.",
       "turns": [
         {
           "send": { "text": "Can I talk to a real person please" },
           "expect": {
-            "human_takeover": true,
-            "quick_replies_count_between": [0, 0]
+            "human_takeover": false,
+            "quick_replies_count_between": [2, 2],
+            "reply_contains_any": ["confirm"]
           }
+        },
+        {
+          "send": {"text": "Confirm"},
+          "expect": {"human_takeover": true, "quick_replies_count_between": [0, 0]}
         }
       ]
     },
     {
       "id": "escalation-complaint",
       "category": "escalation",
-      "description": "A complaint is outside the assistant's authority and must escalate.",
+      "description": "A complaint is outside the assistant's authority and must be offered to a representative for customer confirmation.",
       "turns": [
         {
           "send": { "text": "I am extremely unhappy, my claim was rejected and I want to file a complaint" },
-          "expect": { "human_takeover": true }
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] }
+        },
+        {
+          "send": {"text": "Confirm"},
+          "expect": {"human_takeover": true, "quick_replies_count_between": [0, 0]}
         }
       ]
     },
     {
       "id": "escalation-underwriting-medical",
       "category": "escalation",
-      "description": "A personalised medical/underwriting question must escalate rather than being answered generically.",
+      "description": "A personalised medical/underwriting question must be offered for human review without deciding coverage; the customer may cancel.",
       "turns": [
         {
           "send": { "text": "I was diagnosed with diabetes last year, will you cover me?" },
-          "expect": { "human_takeover": true }
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] }
+        },
+        {
+          "send": {"text": "Cancel"},
+          "expect": {"human_takeover": false, "quick_replies_count_between": [0, 0]}
         }
       ]
     },
     {
       "id": "escalation-negotiation-discount-plain",
       "category": "escalation",
-      "description": "An explicit discount/price-match request is a negotiation and must escalate, never be auto-answered. Control case for regression-negotiation-obfuscation-evasion.",
+      "description": "An explicit discount/price-match request is a negotiation and must be offered for representative review, never negotiated automatically. Control case for regression-negotiation-obfuscation-evasion.",
       "turns": [
         {
           "send": { "text": "Can you give me a discount on this plan?" },
-          "expect": { "human_takeover": true }
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] }
+        },
+        {
+          "send": {"text": "Confirm"},
+          "expect": {"human_takeover": true, "quick_replies_count_between": [0, 0]}
         }
       ]
     },
@@ -189,7 +208,8 @@
       "turns": [
         {
           "send": { "text": "I want to apply for the Plus plan" },
-          "expect": { "human_takeover": false, "product": "plus" }
+          "expect": { "human_takeover": false },
+          "admin_check": {"expect": {"product": "plus"}}
         },
         {
           "send": { "text": "how do I apply, what documents do I need" },
@@ -197,7 +217,11 @@
         },
         {
           "send": { "text": "actually a competitor is offering a better deal, should I switch?" },
-          "expect": { "human_takeover": true }
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] }
+        },
+        {
+          "send": {"text": "Confirm"},
+          "expect": {"human_takeover": true, "quick_replies_count_between": [0, 0]}
         }
       ]
     },
@@ -210,9 +234,15 @@
         {
           "send": { "text": "We have 500 employees, need a quote now, I'm ready to sign up" },
           "expect": {
-            "human_takeover": true,
-            "product": "corporate"
-          }
+            "human_takeover": false,
+            "quick_replies_count_between": [2, 2],
+            "reply_contains_any": ["confirm"]
+          },
+          "admin_check": {"expect": {"product": "corporate"}}
+        },
+        {
+          "send": {"text": "Confirm"},
+          "expect": {"human_takeover": true, "quick_replies_count_between": [0, 0]}
         }
       ]
     },
@@ -256,7 +286,8 @@
       "turns": [
         {
           "send": { "text": "<script>alert(document.cookie)</script> how much is the family plan?" },
-          "expect": { "status_code": 200, "product": "family" }
+          "expect": { "status_code": 200, "reply_contains_any": ["family"] },
+          "admin_check": {"expect": {"product": "family"}}
         }
       ]
     },
@@ -290,7 +321,7 @@
       "turns": [
         {
           "send": { "text": "can you give me a disc0unt on this pl@n please" },
-          "expect": { "human_takeover": true }
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] }
         }
       ]
     },
@@ -317,15 +348,15 @@
       "turns": [
         {
           "send": { "text": "I don't want to buy anymore" },
-          "expect": { "human_takeover": false, "reply_contains_any": ["no problem", "respect your decision"] }
+          "expect": { "human_takeover": false, "reply_contains_any": ["understood"] }
         },
         {
           "send": { "text": "actually wait, tell me about essential" },
           "expect": {
             "human_takeover": false,
-            "product": "essential",
             "quick_replies_count_between": [1, 3]
-          }
+          },
+          "admin_check": {"expect": {"product": "essential"}}
         },
         {
           "send": { "text": "how much is the premium" },
@@ -338,11 +369,12 @@
     {
       "id": "lifecycle-application-through-conversion-cancellation-and-expansion",
       "category": "lifecycle",
-      "description": "A full customer lifecycle in one conversation: applying, converting to an active customer, then a cancellation attempt (which is both a complaint AND a churn-risk flag on the same message) and an expansion signal afterward. Turn 4's human_takeover stays true not because the newborn/family message itself escalates anything, but because turn 3's complaint already opened a case that is still open — escalation is sticky until a human resolves it, which this scenario's admin_check on turn 3 and turn 4 both confirm.",
+      "description": "A full customer lifecycle in one conversation: applying, converting to an active customer, then a cancellation attempt (which is both a complaint AND a churn-risk flag), customer-confirmed representative handoff, and an expansion signal afterward.",
       "turns": [
         {
           "send": { "text": "I want to apply for the essential plan" },
-          "expect": { "human_takeover": false, "product": "essential" }
+          "expect": { "human_takeover": false },
+          "admin_check": {"expect": {"product": "essential"}}
         },
         {
           "send": { "text": "I've completed my payment for the essential plan" },
@@ -351,8 +383,12 @@
         },
         {
           "send": { "text": "I want to cancel my policy" },
-          "expect": { "human_takeover": true },
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] },
           "admin_check": { "expect": { "state": "Closed / Active Customer", "churn_risk": true } }
+        },
+        {
+          "send": {"text": "Confirm"},
+          "expect": {"human_takeover": true, "quick_replies_count_between": [0, 0]}
         },
         {
           "send": { "text": "we just had a newborn, can I add my child to the family plan" },
@@ -382,11 +418,16 @@
       "turns": [
         {
           "send": { "as": "A", "text": "I am extremely unhappy, my claim was rejected and I want to file a complaint" },
-          "expect": { "human_takeover": true }
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] }
+        },
+        {
+          "send": {"as": "A", "text": "Confirm"},
+          "expect": {"human_takeover": true, "quick_replies_count_between": [0, 0]}
         },
         {
           "send": { "as": "B", "text": "How much is the Plus plan?" },
-          "expect": { "human_takeover": false, "product": "plus" }
+          "expect": { "human_takeover": false },
+          "admin_check": {"expect": {"product": "plus"}}
         }
       ]
     },
@@ -397,7 +438,8 @@
       "turns": [
         {
           "send": { "text": "HOW MUCH DOES ESSENTIAL COST??" },
-          "expect": { "human_takeover": false, "product": "essential" }
+          "expect": { "human_takeover": false },
+          "admin_check": {"expect": {"product": "essential"}}
         }
       ]
     },
@@ -435,11 +477,11 @@
       "id": "regression-zero-width-space-no-longer-evades-negotiation",
       "category": "regression",
       "regression_for": "negotiation-leetspeak-evasion",
-      "description": "Fixed — a follow-on to the leetspeak/homoglyph fix. A zero-width space character (U+200B) inserted inside a restricted keyword ('disc​ount') is not a digit/letter substitution, so the de-leeting normalisation added for the leetspeak fix did not catch it and the phrase match failed silently. Fixed by stripping Unicode format characters (category Cf) before matching.",
+      "description": "A zero-width space inserted inside a discount request must not evade representative review; the customer must still be offered explicit confirmation.",
       "turns": [
         {
           "send": { "text": "can you give me a disc​ount on this plan" },
-          "expect": { "human_takeover": true }
+          "expect": { "human_takeover": false, "quick_replies_count_between": [2, 2], "reply_contains_any": ["confirm"] }
         }
       ]
     },
@@ -447,12 +489,13 @@
       "id": "regression-ambiguous-followup-after-greeting-stays-unknown",
       "category": "regression",
       "regression_for": "greeting-text-scanned-as-product-mention",
-      "description": "Fixed — was an open finding. An ambiguous one-word follow-up right after the assistant's own greeting had its product inferred by scanning the ASSISTANT's own prior message text for product keywords; because the greeting lists 'Essential, Family, Plus or Corporate' and 'plus' was checked first, any ambiguous reply resolved to Plus regardless of what the customer meant. Fixed by scanning only the customer's own prior messages for a product mention.",
+      "description": "An ambiguous one-word follow-up right after the assistant's own greeting must remain unresolved rather than inferring a product from the assistant's greeting text.",
       "turns": [
         { "send": { "text": "hi" }, "expect": { "human_takeover": false } },
         {
           "send": { "text": "hmm" },
-          "expect": { "product": "unknown" }
+          "expect": {"human_takeover": false},
+          "admin_check": {"expect": {"product": "unknown"}}
         }
       ]
     }

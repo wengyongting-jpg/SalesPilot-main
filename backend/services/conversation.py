@@ -241,7 +241,18 @@ class ConversationService:
         old_state = opp.state
 
         # 1. Observing segment.
-        outcome = self.extractor.extract(text, context, recorder=recorder)
+        history_search = lambda query, limit: self.repo.search_messages(
+            opp.id, query, limit=limit
+        )
+        outcome = self.extractor.extract(
+            text,
+            context,
+            recorder=recorder,
+            memory=self.repo.get_memory(opp.id),
+            opportunity_id=opp.id,
+            history_search=history_search,
+            opportunity=opp,
+        )
         det = outcome.detection
         if det.product is Product.UNKNOWN:
             det.product = opp.product  # product is sticky across the conversation
@@ -332,7 +343,6 @@ class ConversationService:
                     existing_case.state = opp.state
                     existing_case.recommended_action = nba_for_case.action
                     existing_case.summary = f"{existing_case.summary} [Update] {reason}"
-                    self.repo.update_case(existing_case)
                     case = existing_case
                     opp.human_takeover = True
                     opp.human_intervention_required = True
@@ -425,12 +435,8 @@ class ConversationService:
         if old_state is not opp.state:
             opp.state_history.append(StateHistoryEntry(now, old_state.value, opp.state.value, transition.reason))
             state_change = f"{old_state.value} -> {opp.state.value} ({transition.reason})"
-        self.repo.upsert_opportunity(opp)
-
         run = recorder.finish()
-        self.repo.save_run(run.to_dict(include_content=config.TELEMETRY_CONTENT))
-        print_run(run)
-        log_run(run)
+        run_payload = run.to_dict(include_content=config.TELEMETRY_CONTENT)
 
         receipt = {
             "opportunity_id": opp.id,
@@ -467,7 +473,15 @@ class ConversationService:
             # rather than a reconstruction from the narrower receipt fields.
             result._snapshot = result.to_dict()
             receipt["_snapshot"] = result._snapshot
-            self.repo.save_receipt(opp.id, key, receipt)
+        self.repo.save_turn(
+            opp,
+            run_payload,
+            case=case,
+            receipt=receipt if key else None,
+            memory=outcome.memory,
+        )
+        print_run(run)
+        log_run(run)
         return result
 
     def reset(self, conversation_id: str) -> bool:
@@ -540,14 +554,12 @@ class ConversationService:
                     recommended_action="Contact representative",
                     summary=f"{opp.customer_name} confirmed handoff: {reason}",
                 )
-                self.repo.add_case(case)
             else:
                 # Update existing case
                 case.reason = reason
                 case.state = opp.state
                 case.recommended_action = "Contact representative"
                 case.summary = f"{case.summary} [Update] Customer confirmed: {reason}"
-                self.repo.update_case(case)
 
             opp.human_takeover = True
             reply_text = "A representative will contact you shortly. Thank you for your patience."
@@ -564,9 +576,8 @@ class ConversationService:
         )
         opp.messages.append(reply_message)
 
-        self.repo.upsert_opportunity(opp)
         run = recorder.finish()
-        self.repo.save_run(run.to_dict(include_content=config.TELEMETRY_CONTENT))
+        run_payload = run.to_dict(include_content=config.TELEMETRY_CONTENT)
 
         receipt = {
             "opportunity_id": opp.id,
@@ -581,8 +592,12 @@ class ConversationService:
             "score_total": opp.score.total if opp.score else 0,
             "run_id": run.run_id,
         }
-        if client_message_id:
-            self.repo.save_receipt(opp.id, client_message_id, receipt)
+        self.repo.save_turn(
+            opp,
+            run_payload,
+            case=case,
+            receipt=receipt if client_message_id else None,
+        )
 
         return TurnResult(
             opportunity=opp,

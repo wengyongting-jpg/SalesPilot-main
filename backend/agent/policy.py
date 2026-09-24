@@ -261,12 +261,12 @@ def data_section(label: str, content: str) -> str:
     return f"[DATA: {label}]\n{content}\n[END DATA]"
 
 
-def trim_history(messages: list) -> list:
-    """Keep recent conversation history within token budget.
+MEMORY_WINDOW_MESSAGES = 6
 
-    Simple implementation: keep last 10 messages to avoid context overflow.
-    """
-    return messages[-10:] if len(messages) > 10 else messages
+
+def trim_history(messages: list) -> list:
+    """Keep the shared default six-message transcript window."""
+    return list(messages[-MEMORY_WINDOW_MESSAGES:])
 
 
 def build_reply_prompt(

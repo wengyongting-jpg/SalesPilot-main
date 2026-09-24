@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Repositories: in-memory and SQLite.
 
-Persists opportunities, human cases, idempotency receipts and agent runs. Only
-`backend.services` writes through these.
+Persists opportunities, conversation memory, indexed transcript messages, human
+cases, idempotency receipts and agent runs. Only `backend.services` writes through these.
 """
 from __future__ import annotations
 

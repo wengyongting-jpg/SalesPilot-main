@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """The tool surface: what the model is allowed to do.
 
-Four read-only knowledge accesses and one proposal channel. Nothing here reaches
+Read-only access to approved product and conversation data plus bounded proposal
+channels. Nothing here reaches
 `backend.kernel`, and `agent` has no permission to import it — see
 `docs/v0.0/backend/backend-plan.md` §3 for why the kernel is a mandatory step executed by
 `services` rather than a tool the model may skip, repeat or reorder.
@@ -12,6 +13,7 @@ Why these five are safe to expose:
     compare_products        answer, never a corrupted profile.
     list_products
     conversation_summary
+    search_conversation_history read-only, scoped by the service to this opportunity
     request_human_handoff   writes a *proposal*. `kernel.hitl` reads it as one input
                             among several and decides for itself.
 
@@ -26,7 +28,7 @@ is callable — and testable — with no framework and no network.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ...domain.detection import HandoffProposal
 from ...knowledge.loader import KnowledgeBase
@@ -57,6 +59,8 @@ class ToolContext:
 
     kb: KnowledgeBase
     opportunity: Optional[Any] = None
+    history_search: Optional[Callable[[str, int], list[dict[str, Any]]]] = None
+    history_errors: list[str] = field(default_factory=list)
     calls: list[ToolCall] = field(default_factory=list)
     handoff: HandoffProposal = field(default_factory=HandoffProposal)
     question_field: Optional[str] = None
@@ -99,7 +103,7 @@ class ToolContext:
 # Import tool functions after ToolContext is defined to avoid circular import
 from .knowledge import compare_products, list_products, lookup_product_fact
 from .handoff import request_human_handoff
-from .opportunity import conversation_summary
+from .opportunity import conversation_summary, search_conversation_history
 
 # Alias for backwards compatibility with tests
 get_conversation_summary = conversation_summary

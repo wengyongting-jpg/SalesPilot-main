@@ -146,6 +146,42 @@ def check_global_invariants(invariants: list[dict], turn: Turn) -> list[tuple[bo
         if inv_id == "no-internal-vocabulary-leak":
             hits = [tok for tok in inv["values"] if tok in reply]
             results.append((not hits, f"[invariant:{inv_id}] no internal vocabulary in reply" + (f" (leaked: {hits})" if hits else "")))
+        elif inv_id == "customer-response-allowlist":
+            if turn.status_code != 200:
+                continue
+            allowed = {
+                "reply", "human_takeover", "message", "facts", "quick_replies",
+                "customer_question", "client_message_id",
+            }
+            extra = sorted(set(body) - allowed)
+            message = body.get("message") or {}
+            allowed_message = {
+                "id", "ts", "role", "author", "rep_name", "generation", "text",
+                "client_message_id",
+            }
+            extra_message = sorted(set(message) - allowed_message) if isinstance(message, dict) else []
+            question = body.get("customer_question")
+            allowed_question = {"field", "prompt", "options", "allow_other"}
+            extra_question = (
+                sorted(set(question) - allowed_question)
+                if isinstance(question, dict) else []
+            )
+            extra_options = []
+            if isinstance(question, dict):
+                for option in question.get("options") or []:
+                    if isinstance(option, dict):
+                        extra_options.extend(sorted(set(option) - {"id", "label"}))
+            ok = not extra and not extra_message and not extra_question and not extra_options
+            detail = []
+            if extra:
+                detail.append(f"extra top-level fields: {extra}")
+            if extra_message:
+                detail.append(f"extra message fields: {extra_message}")
+            if extra_question:
+                detail.append(f"extra question fields: {extra_question}")
+            if extra_options:
+                detail.append(f"extra question-option fields: {extra_options}")
+            results.append((ok, f"[invariant:{inv_id}] customer response follows the allowlist" + (f" ({'; '.join(detail)})" if detail else "")))
         elif inv_id == "quick-replies-bounded":
             chips = body.get("quick_replies") or []
             over_count = len(chips) > 3
@@ -162,7 +198,17 @@ def check_global_invariants(invariants: list[dict], turn: Turn) -> list[tuple[bo
                 ok = inv["value"] in reply
                 results.append((ok, f"[invariant:{inv_id}] premium figure carries the disclaimer" + ("" if ok else " (disclaimer missing)")))
         elif inv_id == "no-agent-role":
-            ok = "\"role\": \"agent\"" not in json.dumps(body).replace(" ", "")
+            def has_agent_role(value: Any) -> bool:
+                if isinstance(value, dict):
+                    return any(
+                        (key == "role" and item == "agent") or has_agent_role(item)
+                        for key, item in value.items()
+                    )
+                if isinstance(value, list):
+                    return any(has_agent_role(item) for item in value)
+                return False
+
+            ok = not has_agent_role(body)
             results.append((ok, f"[invariant:{inv_id}] no role=agent anywhere in the response"))
 
     return results
@@ -174,6 +220,10 @@ def check_admin_expectations(expect: dict, admin_body: dict) -> list[tuple[bool,
         want = expect["state"]
         got = admin_body.get("state")
         results.append((got == want, f"admin.state == {want!r} (got {got!r})"))
+    if "product" in expect:
+        want = expect["product"]
+        got = admin_body.get("product")
+        results.append((got == want, f"admin.product == {want!r} (got {got!r})"))
     if "qualification" in expect:
         want = expect["qualification"]
         got = admin_body.get("qualification")
@@ -262,6 +312,8 @@ def run_scenario(base_url: str, scenario: dict, timeout: float, verbose: bool) -
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", help="Base URL of the backend under test, e.g. http://127.0.0.1:8010")
     parser.add_argument("--file", default=str(DEFAULT_FILE), help="Path to the eval scenarios JSON file")

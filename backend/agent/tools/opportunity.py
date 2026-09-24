@@ -12,6 +12,8 @@ body — the same rule, one layer further in.
 """
 from __future__ import annotations
 
+import json
+
 from ...domain.enums import MessageRole, Product
 from . import ToolContext
 
@@ -43,3 +45,31 @@ def conversation_summary(context: ToolContext) -> str:
             lines.extend(f"- {message.text}" for message in recent)
         result = "\n".join(lines)
     return context.record("conversation_summary", {}, result)
+
+
+def search_conversation_history(
+    context: ToolContext, query: str, limit: int = 3
+) -> str:
+    """Find a few older messages in the current opportunity, with source IDs."""
+    query = " ".join(str(query).split())[:120]
+    bounded_limit = max(1, min(int(limit), 5))
+    if not query:
+        return context.record("search_conversation_history", {"query": "", "limit": bounded_limit}, "[]")
+    if context.history_search is None:
+        context.history_errors.append("history lookup is unavailable")
+        result = "History lookup is unavailable for this run."
+    else:
+        try:
+            matches = context.history_search(query, bounded_limit)
+            # Keep each result small even if a stored message is unusually long.
+            compact = [
+                {**item, "text": str(item.get("text", ""))[:320]}
+                for item in matches[:bounded_limit]
+            ]
+            result = json.dumps(compact, ensure_ascii=False)
+        except Exception as error:
+            context.history_errors.append(f"history lookup failed ({type(error).__name__})")
+            result = "History lookup failed; no message content was returned."
+    return context.record(
+        "search_conversation_history", {"query": query, "limit": bounded_limit}, result
+    )

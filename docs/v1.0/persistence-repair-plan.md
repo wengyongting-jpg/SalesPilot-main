@@ -1,6 +1,6 @@
 # SalesPilot persistence and evaluation repair plan
 
-Status: **proposed for review; not implemented**
+Status: **implemented; local acceptance gates passed 2026-09-25**
 
 Baseline: `salespilot-v1.0`, created from `merge_test` at `b6fe80e`
 
@@ -22,13 +22,14 @@ because those facilities exist. Evaluation cases are tests, not examples sent to
 model. Add a small, reviewed few-shot set only if a repeatable model failure remains
 after persistence and knowledge problems are corrected.
 
-The existing `messages`, `score_history`, and `state_history` tables are declared in
-`schema.sql` but the current repository reads and writes these histories inside the
-opportunity JSON payload. Leave the unused tables in place for now. Do not migrate or
-delete user data as part of this repair. Reconsider normalization only if actual
-conversation size or incremental-query performance requires it.
+The `messages`, `score_history`, and `state_history` tables are declared in
+`schema.sql`. Keep the opportunity JSON payload as the source of truth for these
+records; use the message index only for scoped history search. Leave the other
+history tables in place. Do not migrate or delete user data as part of this repair.
+Reconsider normalization only if actual conversation size or incremental-query
+performance requires it.
 
-## Verified starting point
+## Historical verified baseline (before repair)
 
 - The file-backed service uses `SqliteRepository`; the current 20-case backend eval
   and most HTTP tests use `InMemoryRepository`.
@@ -50,19 +51,23 @@ conversation size or incremental-query performance requires it.
   without including the preceding messages passed to the extractor; repairing
   model context is a separate quality task, not a prerequisite for this storage fix.
 
-## Repair rounds
+## Repair rounds and outcome
 
-| Round | Work | Acceptance gate | Estimate |
+All four rounds below have been implemented. Rounds 1–3 were verified with the
+backend suite and the 20-case offline backend evaluation using both repository
+backends. Round 4's 28-scenario offline and live-model results are recorded in
+[`evals/results.md`](../../evals/results.md); that report is dated 2026-09-23 and
+describes the state at that run. No new paid-model run was made for this repair.
+
+| Round | Work | Acceptance gate | Result |
 | --- | --- | --- | --- |
-| 1. State round trip | Extend `storage/codec.py` to serialize and restore the four pending/collected fields and score-history evidence. Use backwards-compatible defaults for existing payloads. | A handoff offer, restart, and typed `Confirm` create one case; cancellation and structured-question answers also survive a restart. | 30–45 min |
-| 2. SQLite consistency | Align the columns written by `SqliteRepository` with those queried, especially agent-run tokens, cost, and pricing-known status. Make the writes for one completed customer turn atomic across opportunity, case, run, and optional receipt, or document and resolve any repository-interface constraint before changing the transaction boundary. | Totals match the saved agent-run payload; a simulated write failure cannot leave a half-completed handoff or replay receipt. Existing databases remain readable. | 60–90 min |
-| 3. Real-path coverage | With explicit approval to add test code, add codec round-trip, SQLite reopen, and real-HTTP multi-turn confirmation checks. Make the 20-case eval runner selectable between memory and SQLite without altering case labels. | Both storage modes pass the 20 offline cases; backend and frontend suites do not regress; no paid model call is needed for this gate. | 45–75 min |
-| 4. Eval-contract alignment | Review the separate top-level 28-scenario suite against the current confirmation flow, customer API response shape, and approved disclaimer. Correct obsolete assertions while retaining useful adversarial and lifecycle cases. | Failures identify product behavior rather than an outdated protocol or a broken assertion. Run the paid-model suite only after the deterministic gates pass, under its existing call and cost limits. | 45–75 min |
+| 1. State round trip | Persist pending/collected fields and score-history evidence with backward-compatible defaults. | Restart, confirmation, cancellation, and structured-answer checks pass. | Complete |
+| 2. SQLite consistency | Persist run metrics and atomically save all durable records for one turn. | Totals and rollback/restart checks pass; existing databases remain readable. | Complete |
+| 3. Real-path coverage | Add codec, SQLite reopen, HTTP multi-turn, and dual-backend evaluation coverage. | 339 backend tests and both 20-case / 67-turn backend evaluations passed on 2026-09-25. | Complete |
+| 4. Eval-contract alignment | Align the 28-scenario suite with the active customer flow, response shape, and disclaimer. | The dated evaluation report records 28/28 offline and 28/28 live-model scenarios passed. | Complete; historical run |
 
-Estimated implementation and local verification: **2.25–3.5 hours for rounds 1–3**,
-or **approximately 3–5 hours including round 4**. Gateway latency can extend the
-final paid-model run. These are estimates, not deadlines. Each round is reported
-separately and must pass its gate before the next result is described as complete.
+Model-context continuity was initially deferred by this plan and has since been
+implemented separately; see [`conversation-memory-repair-plan.md`](conversation-memory-repair-plan.md).
 
 ## Safety and boundaries
 
@@ -76,16 +81,15 @@ separately and must pass its gate before the next result is described as complet
 - Agent-run prompt/output content may contain customer text. Preserve the existing
   telemetry switch and avoid writing secrets or sensitive health details into
   long-lived logs. Privacy hardening beyond this repair needs its own decision.
-- This document authorizes no code or test creation by itself. The repository's
-  `AGENTS.md` requires separate user consent before adding tests. Documentation
-  updates outside this dedicated plan also require their own authorization.
+- The user approved implementation and test creation for the repair. Do not
+  commit or push without a separate request.
 
 ## Deferred decisions
 
-1. Model-context continuity: decide what bounded history and approved business
-   state should actually be sent to model extraction, then evaluate its effect
-   separately from persistence changes.
-2. Few-shot examples: select only after a stable, measurable failure category is
+1. Few-shot examples: select only after a stable, measurable failure category is
    observed; keep examples distinct from held-out eval cases.
-3. Message/history normalization: consider only when the JSON-payload approach
+2. Message/history normalization: consider only when the JSON-payload approach
    becomes measurably inadequate for incremental reads or storage volume.
+
+Model-context continuity was implemented separately. Live-provider summary
+accuracy remains unmeasured and must not be inferred from source-ID checks.

@@ -22,6 +22,7 @@ class InMemoryRepository(Repository):
         self._cases: dict[str, HumanCase] = {}
         self._receipts: dict[tuple[str, str], dict[str, Any]] = {}
         self._runs: list[dict[str, Any]] = []
+        self._memory: dict[str, dict[str, Any]] = {}
 
     # ---- Opportunities ------------------------------------------------------
 
@@ -34,15 +35,48 @@ class InMemoryRepository(Repository):
     ) -> Optional[Opportunity]:
         opp = self._opportunities.get(opportunity_id)
         if opp and history_limit is not None:
+            # A bounded read is a view; trimming it must not mutate stored data.
+            opp = copy.deepcopy(opp)
             # Trim history if requested
-            opp.score_history = opp.score_history[-history_limit:] if opp.score_history else []
-            opp.state_history = opp.state_history[-history_limit:] if opp.state_history else []
+            if history_limit <= 0:
+                opp.score_history = []
+                opp.state_history = []
+            else:
+                opp.score_history = opp.score_history[-history_limit:] if opp.score_history else []
+                opp.state_history = opp.state_history[-history_limit:] if opp.state_history else []
         return opp
 
     def list_opportunities(self) -> list[Opportunity]:
         return sorted(self._opportunities.values(), key=lambda o: o.updated_at)
 
+    def get_memory(self, opportunity_id: str) -> Optional[dict[str, Any]]:
+        value = self._memory.get(opportunity_id)
+        return copy.deepcopy(value) if value is not None else None
+
+    def search_messages(
+        self, opportunity_id: str, query: str, *, limit: int = 3
+    ) -> list[dict[str, Any]]:
+        needle = " ".join(str(query).casefold().split())[:120]
+        if not needle:
+            return []
+        opportunity = self._opportunities.get(opportunity_id)
+        if opportunity is None:
+            return []
+        matches = []
+        for _, message in reversed(list(enumerate(opportunity.messages))):
+            if needle in " ".join(message.text.casefold().split()):
+                matches.append({
+                    "message_id": message.id,
+                    "role": message.role.value,
+                    "timestamp": message.ts.isoformat(),
+                    "text": message.text,
+                })
+                if len(matches) >= max(1, min(int(limit), 5)):
+                    break
+        return matches
+
     def delete_opportunity(self, opportunity_id: str) -> bool:
+        self._memory.pop(opportunity_id, None)
         return self._opportunities.pop(opportunity_id, None) is not None
 
     # ---- Cases ----------------------------------------------------------------
@@ -73,6 +107,36 @@ class InMemoryRepository(Repository):
     def save_run(self, run: dict[str, Any]) -> None:
         self._runs.append(copy.deepcopy(run))
 
+    def save_turn(
+        self,
+        opportunity: Opportunity,
+        run: dict[str, Any],
+        *,
+        case: Optional[HumanCase] = None,
+        receipt: Optional[dict[str, Any]] = None,
+        memory: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Validate and copy payload values before publishing any turn records."""
+        stored_opportunity = opportunity
+        stored_case = case
+        stored_run = copy.deepcopy(run)
+        stored_receipt = copy.deepcopy(receipt) if receipt is not None else None
+        key = None
+        if stored_receipt is not None:
+            key = stored_receipt.get("client_message_id") or stored_run.get("client_message_id")
+            if not key:
+                raise ValueError("a receipt requires a client_message_id")
+        stored_opportunity.updated_at = datetime.now()
+
+        self._opportunities[stored_opportunity.id] = stored_opportunity
+        if memory is not None:
+            self._memory[stored_opportunity.id] = copy.deepcopy(memory)
+        if stored_case is not None:
+            self._cases[stored_case.id] = stored_case
+        self._runs.append(stored_run)
+        if stored_receipt is not None:
+            self._receipts[(stored_opportunity.id, key)] = stored_receipt
+
     def get_run(self, run_id: str) -> Optional[dict[str, Any]]:
         for run in self._runs:
             if run["run_id"] == run_id:
@@ -97,9 +161,22 @@ class InMemoryRepository(Repository):
     def conversation_totals(self, opportunity_id: str) -> dict:
         """Token and cost totals across every run of one conversation."""
         runs = [r for r in self._runs if r.get("opportunity_id") == opportunity_id]
-        total_tokens = sum(r.get("total_tokens", 0) for r in runs)
-        cost_amount = sum(r.get("cost_amount", 0.0) for r in runs)
-        pricing_known = all(r.get("pricing_known", True) for r in runs) if runs else True
+        total_tokens = sum(
+            (r.get("totals") or {}).get("total_tokens", r.get("total_tokens", 0))
+            for r in runs
+        )
+        cost_amount = sum(
+            ((r.get("totals") or {}).get("cost") or {}).get(
+                "amount", r.get("cost_amount", 0.0)
+            )
+            for r in runs
+        )
+        pricing_known = all(
+            run.get("pricing_known", all(
+                call.get("cost") is not None for call in run.get("llm_calls", [])
+            ))
+            for run in runs
+        ) if runs else True
 
         return {
             "opportunity_id": opportunity_id,

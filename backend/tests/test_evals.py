@@ -70,6 +70,15 @@ class TestReplyAssertions(unittest.TestCase):
         self.assertNotIn("private-test-key", repr(errors))
         self.assertEqual("[REDACTED_SECRET]", _redact("private-test-key", "private-test-key"))
 
+    def test_unpriced_model_call_is_not_treated_as_known_zero_cost(self):
+        from backend.evals.runner import _usage
+
+        usage = _usage({"agent_run": {
+            "totals": {"total_tokens": 12, "llm_call_count": 1},
+            "llm_calls": [{"total_tokens": 12}],
+        }})
+        self.assertFalse(usage["pricing_known"])
+
     def test_runner_retains_customer_reply_and_separate_reply_errors(self):
         from backend.evals.runner import run_suite
 
@@ -79,6 +88,14 @@ class TestReplyAssertions(unittest.TestCase):
             self.assertTrue(turn["reply"])
             self.assertEqual([], turn["reply_errors"])
             self.assertIn("customer_facts", turn)
+
+    def test_runner_can_use_sqlite_without_changing_case_labels(self):
+        from backend.evals.runner import run_suite
+
+        report = run_suite(use_model=False, storage="sqlite", selected={"payment_options"})
+        self.assertEqual("sqlite", report["storage"])
+        self.assertEqual(1, report["totals"]["passed"])
+        self.assertEqual("payment_options", report["cases"][0]["id"])
 
 
 class TestPremiumReplyGuard(unittest.TestCase):

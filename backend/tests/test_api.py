@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 fastapi_available = importlib.util.find_spec("fastapi") is not None
 httpx_available = importlib.util.find_spec("httpx") is not None
@@ -360,6 +362,7 @@ class TestAdminSurface(unittest.TestCase):
         self.assertEqual(1, totals["run_count"])
         self.assertIn("pricing_known", totals["cost"])
 
+
     # ---- Cases -----------------------------------------------------------
 
     def test_a_case_is_listed_with_its_exact_status_string(self):
@@ -654,3 +657,46 @@ class TestBrowserOriginsArePermitted(unittest.TestCase):
         self.assertEqual(set(), deep_keys(response.json()) & set(
             FORBIDDEN_ON_CUSTOMER_TIER
         ))
+
+
+class TestHttpHandoffAcrossSqliteRestart(unittest.TestCase):
+    @requires_http
+    def test_typed_confirmation_after_reopen_creates_one_case(self):
+        from fastapi.testclient import TestClient
+
+        from backend.api.app import create_app
+        from backend.storage.sqlite import SqliteRepository
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "http.db"
+            first_repo = SqliteRepository(path)
+            first_client = TestClient(create_app(repository=first_repo))
+            offered = first_client.post("/api/messages", json={
+                "customer_id": "C-http",
+                "customer_name": "Sam",
+                "text": "I want to speak to a human agent",
+                "client_message_id": "offer-http",
+            })
+            self.assertEqual(200, offered.status_code)
+            self.assertEqual(
+                {"handoff_confirm", "handoff_cancel"},
+                {item["id"] for item in offered.json()["quick_replies"]},
+            )
+            first_repo.close()
+
+            second_repo = SqliteRepository(path)
+            second_client = TestClient(create_app(repository=second_repo))
+            try:
+                confirmed = second_client.post("/api/messages", json={
+                    "customer_id": "C-http",
+                    "customer_name": "Sam",
+                    "text": "Confirm",
+                    "client_message_id": "confirm-http",
+                })
+                self.assertEqual(200, confirmed.status_code)
+                self.assertTrue(second_repo.get_opportunity("C-http").human_takeover)
+                cases = second_client.get("/api/admin/cases").json()["items"]
+                self.assertEqual(1, len(cases))
+                self.assertEqual(2, len(second_repo.list_runs(opportunity_id="C-http")))
+            finally:
+                second_repo.close()
