@@ -3,7 +3,7 @@
 
 Four read-only knowledge accesses and one proposal channel. Nothing here reaches
 `backend.kernel`, and `agent` has no permission to import it — see
-`docs/backend-plan.md` §3 for why the kernel is a mandatory step executed by
+`docs/v0.0/backend/backend-plan.md` §3 for why the kernel is a mandatory step executed by
 `services` rather than a tool the model may skip, repeat or reorder.
 
 Why these five are safe to expose:

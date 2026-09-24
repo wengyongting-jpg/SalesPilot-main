@@ -82,7 +82,7 @@ def _allow_development_origins(app) -> None:
     avoided even though nothing here is protected, because it would set a habit that
     becomes a real hole the moment authentication exists. `allow_credentials` stays off:
     there is no session or cookie to carry, so enabling it would widen the surface for
-    no benefit. Contract and acceptance criteria: `docs/backend-contract.md` item 15.
+    no benefit. Contract and acceptance criteria: `docs/v0.0/backend/backend-contract.md` item 15.
     """
     if not config.CORS_ORIGINS:
         return

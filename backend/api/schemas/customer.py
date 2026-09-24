@@ -3,7 +3,7 @@
 
 **These models have no field in which sales intelligence could be placed.**
 
-`docs/api/interface-v1.md` §2: the visibility boundary is enforced server-side by
+`docs/v0.0/api/interface-v1.md` §2: the visibility boundary is enforced server-side by
 payload shape, not by client discipline. The frozen build returned the score, the
 priority, the signals, the state, the next best action and the case to whoever called
 the customer endpoint, and relied on the customer frontend to discard them. That is not

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Priority: derived from both axes as a matrix, never by thresholding one number.
 
-Specification: `docs/backend-contract.md` gap register item 13.
+Specification: `docs/v0.0/backend/backend-contract.md` gap register item 13.
 
 The wire values are unchanged — `HIGH`, `MEDIUM`, `LOW` — so badge and count logic
 in the admin console is unaffected. Only the derivation changes.

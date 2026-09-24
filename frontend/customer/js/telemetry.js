@@ -1,5 +1,5 @@
 /**
- * Harness telemetry channel — Plane B of docs/api/interface-v1.md §3.
+ * Harness telemetry channel — Plane B of docs/v0.0/api/interface-v1.md §3.
  *
  * Active **only** when this app runs inside an iframe. Standalone, every method
  * is a no-op and nothing is ever posted anywhere (requirement 6.10): a customer
@@ -105,7 +105,7 @@ export function createTelemetry() {
      * Configuration changes are not delivered here. The console reconfigures the
      * device by reloading the iframe with new query parameters, which rebuilds
      * the transport cleanly instead of mutating a live gateway. See
-     * .kiro/specs/admin-console-ui/design.md § Harness.
+     * docs/v0.0/frontend/admin-console-ui/design.md § Harness.
      */
     onCommand(handler) {
       window.addEventListener('message', (event) => {

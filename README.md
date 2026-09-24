@@ -7,7 +7,7 @@ score, priority, agent traces and human-handoff cases.
 
 The model is deliberately not the business authority. Deterministic backend rules
 own qualification, scoring, state transitions, escalation and cost limits. An LLM
-may extract observations, choose bounded knowledge tools and phrase a response;
+may extract observations and select approved knowledge facts for a response;
 offline mode uses rule-based extraction and templates and labels that fact clearly.
 
 ## Run locally
@@ -43,12 +43,17 @@ By default, the backend runs in offline mode using rule-based extraction and tem
 replies. Every message is marked `generation: "template"` and `/health` reports
 `degraded: true`.
 
-To verify the API is working:
+To inspect the effective configuration or run the backend tests in offline mode:
 
 ```powershell
-py -3 -m backend --test-api    # Zero-cost API test
-py -3 -m backend --probe       # Check current configuration
+$env:SALESPILOT_LLM = 'offline'
+py -3 -m backend --probe
+py -3 -m unittest discover -s backend/tests
 ```
+
+If you use the same PowerShell session for LLM mode later, remove that override
+with `Remove-Item Env:SALESPILOT_LLM` first; otherwise it takes precedence over
+the value in `.env`.
 
 **Optional: Enable LLM Mode (Costs Money)**
 
@@ -72,6 +77,10 @@ py -3 -m backend --probe       # Check current configuration
    py -3 -m backend --probe
    ```
 
+   In LLM mode, `--probe` checks provider reachability and may make a network
+   request. Run the test suite with `SALESPILOT_LLM=offline` to prevent an
+   existing local `.env` from enabling paid model calls during verification.
+
 **Cost Limits:**
 - Default: $0.03 per message (configurable via `SALESPILOT_LLM_COST_LIMIT_USD`)
 - Tool calls: max 3 per message
@@ -82,11 +91,15 @@ See [.env.example](.env.example) for all available configuration options.
 ## Verify
 
 ```powershell
+$env:SALESPILOT_LLM = 'offline'
 py -3 -m unittest discover -s backend/tests
 node --test "frontend/tests/**/*.test.js"
 ```
 
-Current baseline: 428 backend tests and 283 frontend tests pass.
+These commands run the maintained suites. The archived documents contain older
+test counts that should not be used as a current baseline. The known SQLite
+handoff-persistence gap is described in the
+[v1.0 repair plan](docs/v1.0/persistence-repair-plan.md).
 
 ## Repository map
 
@@ -96,9 +109,9 @@ frontend/customer/       Customer-safe chat surface
 frontend/admin/          Staff inbox, cases, traces and test harness
 backend/knowledge/data/  Approved product knowledge base
 runtime/                 Local SQLite data
-evals/                   Multi-turn evaluation cases and runner
-docs/api/interface-v1.md HTTP contract and visibility boundary
-.kiro/specs/             Product requirements, designs and acceptance checklists
+evals/                   Portable evaluation cases and runner
+docs/v1.0/               Current work and review plans
+docs/v0.0/               Historical contracts, Kiro-era specs and delivery records
 ```
 
 Important demo limitations: there is no authentication or multi-tenancy, WhatsApp
@@ -106,4 +119,6 @@ Cloud API delivery is not implemented, and delivery ticks are client milestones
 rather than server read receipts. All premium figures are fictional.
 
 See [backend/README.md](backend/README.md) and [frontend/README.md](frontend/README.md)
-for architecture and operating details.
+for current architecture and operating details, and [docs/README.md](docs/README.md)
+for the document map. Historical API contracts are preserved under `docs/v0.0/api/`;
+verify current behavior against the implementation and tests.

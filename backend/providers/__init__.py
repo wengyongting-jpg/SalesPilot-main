@@ -5,7 +5,7 @@ This package holds no client and imports no agent framework. `resolve()` reads
 configuration and returns a `ProviderSpec` — an endpoint, a model name, a credential
 and a timeout, or an explicit reason there is nothing to call. `agent.model_factory`
 is what turns a spec into something callable, because §4 rule 2 of
-`docs/backend-plan.md` gives the framework import to `agent/` alone.
+`docs/v0.0/backend/backend-plan.md` gives the framework import to `agent/` alone.
 
     providers/   decides *what* to talk to, and can say "nothing, because ..."
     agent/       decides *how* to talk to it

@@ -97,7 +97,7 @@ export function createStore() {
     /**
      * Detected, never assumed. Populated by the adapter from what the backend
      * actually returns, so a missing backend feature disables itself rather
-     * than breaking the UI. See docs/backend-contract.md Part B.
+     * than breaking the UI. See docs/v0.0/backend/backend-contract.md Part B.
      */
     capabilities: {
       idempotency: false,

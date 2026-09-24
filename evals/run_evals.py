@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Runner for evals/conversation-scenarios.json against any CareSure backend
-that implements POST /api/messages per docs/api/interface-v1.md.
+that implements POST /api/messages per docs/v0.0/api/interface-v1.md.
 
 Stdlib only, so it runs against a backend without needing this repo's own
 virtualenv installed alongside it.

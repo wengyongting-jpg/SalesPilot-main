@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P4: agent run records, cost accounting and terminal rendering.
 
-Acceptance criteria from `docs/backend-plan.md` §9, restated as assertions:
+Acceptance criteria from `docs/v0.0/backend/backend-plan.md` §9, restated as assertions:
 
     1. A normal run prints one block with per-step kind, duration, status,
        model, tokens and cost, and totals that equal the sum of the parts.

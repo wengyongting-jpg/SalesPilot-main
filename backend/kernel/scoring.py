@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """The opportunity value score: two axes, scored separately.
 
-Specification: `docs/backend-contract.md` gap register item 13.
+Specification: `docs/v0.0/backend/backend-contract.md` gap register item 13.
 
     Fit (0-100)        how appropriate and how valuable this opportunity is
         need_identified      40

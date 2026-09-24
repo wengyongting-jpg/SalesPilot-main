@@ -4,7 +4,7 @@
  * English only. Also holds the presentation label maps for backend enums, so a
  * view never embeds a backend value as display copy.
  *
- * Vocabulary note: this file never says "turns". Per docs/api/interface-v1.md
+ * Vocabulary note: this file never says "turns". Per docs/v0.0/api/interface-v1.md
  * §1.1 the customer-message counter is named explicitly, because "turns" is read
  * as agent turns and is not.
  */
@@ -66,13 +66,13 @@ export const strings = {
     needsTakeover:
       'Take over the case before replying. While the AI owns the conversation it ' +
       'answers on its own.',
-    // Item 14 in docs/backend-contract.md: PATCH /cases/{id} -> Taken Over does
+    // Item 14 in docs/v0.0/backend/backend-contract.md: PATCH /cases/{id} -> Taken Over does
     // not set human_takeover on the opportunity, so a reply would be rejected
     // with 409. Say so instead of offering a composer that cannot send.
     takeoverNotApplied:
       'This case reads Taken Over, but the backend still reports the assistant as ' +
       'handling the conversation, so a reply would be rejected. Tracked as item 14 ' +
-      'in docs/backend-contract.md.',
+      'in docs/v0.0/backend/backend-contract.md.',
     // The backend's write path shipped (contract item 4), so this is now about the
     // selected transport rather than about a missing endpoint.
     unsupported:
@@ -141,7 +141,7 @@ export const strings = {
     unavailableBody:
       'This transport does not report agent telemetry. Client-observed duration ' +
       'and status are shown where available; model, token, cost and step detail ' +
-      'are not reported. Tracked as item 8 in docs/backend-contract.md.',
+      'are not reported. Tracked as item 8 in docs/v0.0/backend/backend-contract.md.',
     totalTokens: 'Total tokens',
     totalCost: 'Total cost',
     runCount: 'Agent runs',

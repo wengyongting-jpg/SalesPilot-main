@@ -2,8 +2,7 @@
 """Pytest configuration for the rebuild's test suite.
 
 The repository is run from source without installation, so the repository root
-has to be importable before `import backend` works. The frozen top-level
-`tests/` directory does the same thing for `salespilot`.
+has to be importable before `import backend` works.
 """
 import sys
 from pathlib import Path

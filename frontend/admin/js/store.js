@@ -10,7 +10,7 @@
  *
  * Counter naming: the store uses `customerMessageCount`, never `turns`. The
  * adapter renames the backend field on the way in, which confines the misleading
- * name to a single line of code. See docs/api/interface-v1.md §1.1.
+ * name to a single line of code. See docs/v0.0/api/interface-v1.md §1.1.
  */
 
 export function createStore() {

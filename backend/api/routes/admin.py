@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The admin surface. `docs/api/interface-v1.md` §5.1, §5.3, §5.4.
+"""The admin surface. `docs/v0.0/api/interface-v1.md` §5.1, §5.3, §5.4.
 
 The inverse of the customer tier: full sales intelligence, including model telemetry.
 Responses are the service layer's canonical dictionaries, so the console reads exactly
@@ -8,7 +8,7 @@ what the pipeline produced rather than a re-declared copy of it.
 There is no authentication here, or anywhere. That is a recorded and accepted demo
 limitation, not an oversight: anyone who can reach this surface can read every
 transcript and take over any case. It is documented in `interface-v1.md` §2 and
-`.kiro/steering/product.md`, deliberately rather than papered over with a fake login.
+`docs/v0.0/product/product.md`, deliberately rather than papered over with a fake login.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def list_opportunities(request: Request, history_limit: Optional[int] = None) ->
 
 @router.get("/dashboard")
 def dashboard(request: Request) -> dict:
-    """The queue. `docs/api/interface-v1.md` §5.2.
+    """The queue. `docs/v0.0/api/interface-v1.md` §5.2.
 
     Does not return the full detail per item — it trims messages, score history and
     state history so a 100-item list does not carry 100 full transcripts. The admin
@@ -116,7 +116,7 @@ def get_opportunity(
 
 @router.get("/opportunities/{opportunity_id}/cost")
 def get_opportunity_cost(opportunity_id: str, request: Request) -> dict:
-    """Token totals for one opportunity. `docs/api/interface-v1.md` §5.5."""
+    """Token totals for one opportunity. `docs/v0.0/api/interface-v1.md` §5.5."""
     repo = services_of(request).repo
     runs = repo.list_runs(opportunity_id=opportunity_id)
 
@@ -145,7 +145,7 @@ def get_opportunity_cost(opportunity_id: str, request: Request) -> dict:
 def post_rep_reply(
     opportunity_id: str, payload: RepReplyRequest, request: Request
 ) -> dict:
-    """Append a representative's own message. `docs/api/interface-v1.md` §5.4."""
+    """Append a representative's own message. `docs/v0.0/api/interface-v1.md` §5.4."""
     message = services_of(request).rep_reply.reply(
         opportunity_id,
         text=payload.text,
@@ -176,7 +176,7 @@ def get_case(case_id: str, request: Request) -> dict:
 def update_case_status(
     case_id: str, payload: CaseStatusUpdate, request: Request
 ) -> dict:
-    """Transition a case. `docs/api/interface-v1.md` §4.4."""
+    """Transition a case. `docs/v0.0/api/interface-v1.md` §4.4."""
     status = parse_status(payload.status)
     case = services_of(request).cases.set_status(case_id, status)
     return case_to_dict(case)
@@ -184,7 +184,7 @@ def update_case_status(
 
 @router.get("/analytics")
 def get_analytics(request: Request) -> dict:
-    """Counts and breakdowns. `docs/api/interface-v1.md` §4.2."""
+    """Counts and breakdowns. `docs/v0.0/api/interface-v1.md` §4.2."""
     return services_of(request).analytics.compute_analytics()
 
 
@@ -195,7 +195,7 @@ def list_runs(
     client_message_id: Optional[str] = None,
     limit: int = 50,
 ) -> dict:
-    """List agent runs with optional filters. `docs/api/interface-v1.md` §4.3."""
+    """List agent runs with optional filters. `docs/v0.0/api/interface-v1.md` §4.3."""
     repo = services_of(request).repo
     runs = repo.list_runs(
         opportunity_id=opportunity_id,
@@ -207,7 +207,7 @@ def list_runs(
 
 @router.get("/agent-runs/{run_id}")
 def get_run(run_id: str, request: Request) -> dict:
-    """One agent run in full. `docs/api/interface-v1.md` §4.3."""
+    """One agent run in full. `docs/v0.0/api/interface-v1.md` §4.3."""
     run = services_of(request).repo.get_run(run_id)
     if run is None:
         raise errors.not_found(f"Run {run_id} not found")

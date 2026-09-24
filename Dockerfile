@@ -19,7 +19,7 @@ EXPOSE 8000
 # Environment defaults (override at deploy time)
 ENV SALESPILOT_HOST=0.0.0.0
 ENV SALESPILOT_PORT=8000
-ENV SALESPILOT_LLM=stub
+ENV SALESPILOT_LLM=offline
 
 # Run the API server with demo data seeded
-CMD ["python", "run.py", "--serve", "--seed", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "backend", "--serve", "--seed", "--host", "0.0.0.0", "--port", "8000"]

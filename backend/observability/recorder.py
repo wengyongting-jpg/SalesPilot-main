@@ -7,7 +7,7 @@ kernel steps in `services/` — so the record is complete without any layer
 knowing about the others.
 
 An exception inside a step marks it `error` and re-raises. A program error
-stays a program error (`docs/backend-plan.md` §7's first failure class);
+stays a program error (`docs/v0.0/backend/backend-plan.md` §7's first failure class);
 only the caller can decide a step *degraded*, by saying so.
 """
 from __future__ import annotations

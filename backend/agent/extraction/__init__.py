@@ -24,7 +24,7 @@ class ExtractionOutcome:
 
     `source`, `violations` and `unavailable` exist so a caller (eventually
     `services`) can report a degraded run without inspecting the detection for
-    clues -- exactly the distinction `docs/backend-plan.md` §7 draws between
+    clues -- exactly the distinction `docs/v0.0/backend/backend-plan.md` §7 draws between
     "model unavailable" (`unavailable`) and "model wrong" (`violations`).
 
     `handoff` is the model's proposal, if it made one; the kernel decides.

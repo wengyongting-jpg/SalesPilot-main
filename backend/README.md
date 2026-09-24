@@ -1,6 +1,6 @@
 # `backend/` — SalesPilot backend
 
-> ## The API and both frontend integration paths are operational.
+> ## The API and both frontend integration paths are operational for the demo.
 >
 > ```powershell
 > py -3 -m backend --serve --seed      # http://127.0.0.1:8000
@@ -11,48 +11,46 @@
 > template peers, and every reply is marked `generation: "template"` so nothing is
 > mistaken for model output. `/health` reports `degraded: true` while that is the case.
 >
-> To verify the API is working correctly:
+> To check the configured provider without a full conversation test (a configured
+> provider may receive a reachability request):
 >
 > ```powershell
-> py -3 -m backend --test-api          # zero-cost API test (offline mode)
+> py -3 -m backend --probe
 > ```
 >
-> **Interface v1 is frozen** as of 2026-09-22, so both frontends can build against a
-> contract that will not move: [`docs/api/interface-v1.md`](../docs/api/interface-v1.md)
-> §5. §4 of that file is historical — it describes the frozen `salespilot/` build.
+> The historical interface v1 contract is frozen:
+> [`interface-v1.md`](../docs/v0.0/api/interface-v1.md). Verify current behavior
+> against the implementation and tests; the archive is not a current readiness claim.
 >
 > The provider boundary is OpenAI-compatible. Offline mode, the direct OpenAI path
 > and the organiser-gateway configuration all resolve through the same model factory.
 
 | | |
 | --- | --- |
-| **Status** | All eight phases complete. Both surfaces serve, the model path works, interface v1 is frozen. |
-| **Owner** | Backend track. Read-only for the frontend track. |
-| **Plan** | [`docs/backend-plan.md`](../docs/backend-plan.md) — reasoning, target architecture, phase-by-phase acceptance criteria |
-| **Wire contract** | [`docs/api/interface-v1.md`](../docs/api/interface-v1.md) — authoritative request/response shapes |
-| **Outstanding gaps** | [`docs/backend-contract.md`](../docs/backend-contract.md) — the register, with per-item tests |
-| **What changed when** | [`docs/backend-changelog.md`](../docs/backend-changelog.md) |
+| **Status** | Demo surfaces operate; SQLite persistence and evaluation repair are planned, not complete. |
+| **Current plan** | [`persistence-repair-plan.md`](../docs/v1.0/persistence-repair-plan.md) |
+| **Historical design** | [`backend-plan.md`](../docs/v0.0/backend/backend-plan.md) and [`interface-v1.md`](../docs/v0.0/api/interface-v1.md) |
 
 ---
 
 ## What works today
 
 ```powershell
-py -3 -m backend --test-api     # zero-cost API test (offline mode)
-py -3 -m backend --probe        # effective configuration, and whether it answers
+$env:SALESPILOT_LLM = 'offline' # prevents a local .env from enabling model calls
+py -3 -m backend --probe        # effective offline configuration
 py -3 -m backend --demo         # the whole pipeline in the terminal, no server
 py -3 -m backend --serve --seed # the API on http://127.0.0.1:8000
 py -3 -m unittest discover -s backend/tests
 ```
 
-439 tests, covering the layering rules, the domain model, the whole deterministic
-kernel, the agent shell including its tool-calling loop, the run recorder, both
-repositories, the orchestrator, the HTTP tiers and provider resolution. Everything
-runs offline: the tool-calling loop against `TestModel`, the provider tests against a
-throwaway HTTP server on localhost. None of it needs a key or a network.
+Remove the temporary override with `Remove-Item Env:SALESPILOT_LLM` before using
+the same terminal to test a configured LLM provider.
 
-`--test-api` runs a complete zero-cost test of the API pipeline in offline mode,
-verifying message processing and idempotency without any model calls.
+The backend suite covers the deterministic kernel, agent shell, repositories,
+orchestrator, HTTP tiers, and provider resolution. Keep the provider in offline
+mode when running it to avoid paid model calls from a local `.env`. Do not infer
+current readiness from an older
+test count or archived phase checklist.
 
 `--demo` is the one to reach for when the question is *what did the agent actually
 do*. It prints, for every turn, the detected intent and signals, the state transition,
@@ -61,7 +59,7 @@ best action, each tool the model chose to call, and the run's token count and co
 two web surfaces show the customer's side and the sales queue; neither shows what
 happened in between.
 
-## Progress
+## Historical rebuild phases
 
 | Phase | Delivers | Status |
 | --- | --- | --- |
@@ -74,7 +72,8 @@ happened in between.
 | **P6** | `api/` — the HTTP surface, split by visibility tier | **done** |
 | **P7** | Model access, API testing, `--demo`, interface freeze | **done** |
 
-Every endpoint works offline: with no model configured the pipeline runs on the
+These are records of the earlier rebuild, not a claim that persistence repair is
+finished. With no model configured the pipeline runs on the
 rule-based and template peers, and every reply is marked `generation: "template"`.
 
 ## Why a rebuild rather than a refactor
@@ -96,7 +95,7 @@ not code quality:
 - **Almost no observability.** One log line per message. No per-step timing, no token
   or cost accounting, no way to see that a step had degraded.
 
-Full account with the measurements: [`docs/backend-plan.md`](../docs/backend-plan.md)
+Full account with the measurements: [`docs/v0.0/backend/backend-plan.md`](../docs/v0.0/backend/backend-plan.md)
 §1.
 
 ## Layout
@@ -121,7 +120,7 @@ domain  <-  kernel  <-  services  ->  agent  ->  providers
 | `observability/` | Agent run records, cost, terminal rendering. Never imported by `domain` or `kernel`. |
 | `providers/` | Model transports, including an offline provider that forces the deterministic path. |
 | `storage/` | Repositories: in-memory and SQLite. |
-| `services/` | Use-cases. Owns transactions, idempotency and run records. The only package that writes storage. |
+| `services/` | Use-cases and orchestration of idempotency and run records. Atomic SQLite writes remain a planned repair. |
 | `api/` | The HTTP surface, split by visibility tier. |
 
 `backend/tests/test_architecture.py` fails the build on a layering violation, on

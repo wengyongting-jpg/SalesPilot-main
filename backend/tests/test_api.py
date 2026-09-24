@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P6: the HTTP surface, split by visibility tier.
 
-`docs/api/interface-v1.md` §2 is the specification, and its opening line is the point:
+`docs/v0.0/api/interface-v1.md` §2 is the specification, and its opening line is the point:
 **the visibility boundary is enforced server-side by payload shape, not by client
 discipline.**
 
@@ -540,7 +540,7 @@ if __name__ == "__main__":
 
 @requires_http
 class TestBrowserOriginsArePermitted(unittest.TestCase):
-    """`docs/backend-contract.md` item 15, all six acceptance criteria.
+    """`docs/v0.0/backend/backend-contract.md` item 15, all six acceptance criteria.
 
     The two frontends are served as static files from another port, so they are
     permanently cross-origin and a browser rejects every `fetch` before it reaches the

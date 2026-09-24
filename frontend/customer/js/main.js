@@ -266,7 +266,7 @@ store.subscribe((state) => {
 /**
  * Counters reported to the console. Named `customerMessageCount` on purpose:
  * it counts messages the customer sent, which is not an agent turn count.
- * See docs/api/interface-v1.md §1.1.
+ * See docs/v0.0/api/interface-v1.md §1.1.
  */
 function reportState(state) {
   if (!telemetry.enabled) return;

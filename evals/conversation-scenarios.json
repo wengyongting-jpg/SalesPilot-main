@@ -2,11 +2,11 @@
   "eval_suite": "caresure-conversation-behavioural-evals",
   "version": "1.0",
   "generated": "2026-09-23",
-  "purpose": "Portable, black-box behavioural scenarios for CareSure's customer chat pipeline. Written against the frozen customer HTTP contract (docs/api/interface-v1.md) so they can be replayed against this backend or a different implementation of the same contract for parity/regression checking.",
+  "purpose": "Portable, black-box behavioural scenarios for CareSure's customer chat pipeline. Written against the frozen customer HTTP contract (docs/v0.0/api/interface-v1.md) so they can be replayed against this backend or a different implementation of the same contract for parity/regression checking.",
   "target_contract": {
     "protocol": "HTTP",
     "endpoint": "POST /api/messages",
-    "spec_ref": "docs/api/interface-v1.md §5.1",
+    "spec_ref": "docs/v0.0/api/interface-v1.md §5.1",
     "request_shape": {
       "customer_id": "string, default \"\" (empty creates a new opportunity)",
       "customer_name": "string, required, min length 1",
@@ -43,20 +43,20 @@
     },
     {
       "id": "quick-replies-bounded",
-      "description": "docs/api/interface-v1.md §5.5 contract.",
+      "description": "docs/v0.0/api/interface-v1.md §5.5 contract.",
       "applies_to": "every scenario's every turn, field: response.quick_replies",
       "check": "count <= 3 and every label.length <= 24"
     },
     {
       "id": "premium-figure-implies-disclaimer",
-      "description": "Any reply quoting a premium must carry the demo disclaimer verbatim, never truncated or hidden (.kiro/steering/product.md compliance red line). Scoped to premium specifically, not any dollar figure: a coverage limit or deductible (also a 'S$...' figure) does not require this disclaimer by design, only a premium quote does.",
+      "description": "Any reply quoting a premium must carry the demo disclaimer verbatim, never truncated or hidden (docs/v0.0/product/product.md compliance red line). Scoped to premium specifically, not any dollar figure: a coverage limit or deductible (also a 'S$...' figure) does not require this disclaimer by design, only a premium quote does.",
       "applies_to": "every scenario's every turn, field: response.reply",
       "check": "if reply (case-insensitively) contains 'premium' and matches /S\\$\\s?[\\d,]+/ then reply_contains",
       "value": "All premiums are fictional indicative rates for the SalesPilot demo and do not represent actual insurance quotations. Final premiums are subject to age, underwriting, plan selection and insurer assessment."
     },
     {
       "id": "no-agent-role",
-      "description": "docs/api/interface-v1.md: role is customer|business only, never a legacy \"agent\" value, on any endpoint.",
+      "description": "docs/v0.0/api/interface-v1.md: role is customer|business only, never a legacy \"agent\" value, on any endpoint.",
       "applies_to": "every scenario, any transcript read",
       "check": "no field named role has value \"agent\" anywhere in the response"
     }

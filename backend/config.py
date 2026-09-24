@@ -184,7 +184,7 @@ CORS_ORIGINS = [
 
 # ---- Compliance ----------------------------------------------------------
 # Appended verbatim whenever a reply quotes a premium. Never truncated, never
-# hidden: `.kiro/steering/product.md` treats this as a red line.
+# hidden: `docs/v0.0/product/product.md` treats this as a red line.
 DEMO_DISCLAIMER = (
     "All premiums are fictional indicative rates for the SalesPilot demo and do "
     "not represent actual insurance quotations. Final premiums are subject to age, "

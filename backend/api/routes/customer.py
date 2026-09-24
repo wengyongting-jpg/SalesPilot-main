@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The customer surface. `docs/api/interface-v1.md` §5.1.
+"""The customer surface. `docs/v0.0/api/interface-v1.md` §5.1.
 
 Three endpoints, and every response goes through a projection in
 `api.schemas.customer` that has no field for sales intelligence. The tier boundary is

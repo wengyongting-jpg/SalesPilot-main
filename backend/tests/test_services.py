@@ -3,7 +3,7 @@
 
 This is where the central design claim of the rebuild becomes true or false. The
 kernel is supposed to be a **mandatory, exactly-once step executed by `services`** —
-not a tool the model may skip, repeat or reorder (`docs/backend-plan.md` §3). Until
+not a tool the model may skip, repeat or reorder (`docs/v0.0/backend/backend-plan.md` §3). Until
 now that was an argument; here it is a line of Python, and these tests are what hold
 it to account.
 

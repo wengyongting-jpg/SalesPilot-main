@@ -12,7 +12,7 @@
  * `next_best_action` and `case` from the response, because the old backend sent
  * them to whoever asked. The rebuilt backend enforces the boundary server-side
  * with a typed projection that has no field for them
- * (`docs/api/interface-v1.md` §2), so the customer response cannot carry them.
+ * (`docs/v0.0/api/interface-v1.md` §2), so the customer response cannot carry them.
  * `assertNoIntelligence` below verifies that at runtime rather than trusting it:
  * if a future change widens the surface, this logs loudly instead of quietly
  * rendering internal data to a customer.

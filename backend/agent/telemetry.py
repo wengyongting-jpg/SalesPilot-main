@@ -7,7 +7,7 @@ by `test_architecture.py`), so everything a run record needs — per-request
 usage, model name, timings, tool calls, prompt and output text — is read from
 `result.all_messages()` here and handed over as plain values.
 
-Also classifies failures for `docs/backend-plan.md` §7's three classes:
+Also classifies failures for `docs/v0.0/backend/backend-plan.md` §7's three classes:
 `UNAVAILABLE_ERRORS` is "model unavailable"; `UnexpectedModelBehavior` with a
 `ValidationError` cause is "model wrong" (handled by the extraction peer);
 anything else is a program error and propagates.

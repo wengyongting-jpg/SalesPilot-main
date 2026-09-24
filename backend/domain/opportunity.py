@@ -5,7 +5,7 @@ Holds where the customer is in the buying journey, what has been observed, how
 valuable the opportunity looks, and the full transcript. Every business decision
 about it is made in `backend.kernel`; this module only holds the state.
 
-On counting, see `docs/api/interface-v1.md` §1.1. The field is
+On counting, see `docs/v0.0/api/interface-v1.md` §1.1. The field is
 `customer_message_count`, because that is what it counts. `turns` survives as a
 read-only alias so the wire contract is unbroken, but it cannot be assigned, which
 means no code inside the backend can use the misleading name to mutate state.

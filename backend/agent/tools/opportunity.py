@@ -3,7 +3,7 @@
 
 Deliberately thin, and deliberately **free of sales intelligence**. The model is
 composing a message the customer will read, so telling it the opportunity's state,
-score or priority creates the leak that `docs/backend-plan.md` §3 red line 3 exists
+score or priority creates the leak that `docs/v0.0/backend/backend-plan.md` §3 red line 3 exists
 to prevent. What it gets is what a colleague would tell it in a corridor: who this
 is, which plan they have been discussing, and what they last said.
 

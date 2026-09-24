@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P0: the layering rules of docs/backend-plan.md §4, made executable.
+"""P0: the layering rules of docs/v0.0/backend/backend-plan.md §4, made executable.
 
 Those rules are the whole point of the rebuild's directory design. Written as
 prose they are advice; written here they are a build failure. The specific defect

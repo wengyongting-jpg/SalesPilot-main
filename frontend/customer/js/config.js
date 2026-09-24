@@ -65,7 +65,7 @@ export const config = applyUrlOverrides({
    * backend. Pass `?transport=mock` when a standalone fixture-only demo is useful.
    *
    * Browser integration used to be blocked by the absence of CORS headers
-   * (`docs/backend-contract.md` item 15, formerly numbered 13). That shipped on
+   * (`docs/v0.0/backend/backend-contract.md` item 15, formerly numbered 13). That shipped on
    * 2026-09-22: the API now echoes `Access-Control-Allow-Origin` for configured
    * loopback origins, so serving this app from 8123 against the API on 8000 works
    * in a browser. The origin must appear in the backend's

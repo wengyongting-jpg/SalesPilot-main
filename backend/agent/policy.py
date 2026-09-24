@@ -28,7 +28,7 @@ from ..domain.enums import Intent, OpportunityState, Priority, Product, ReplyMod
 from . import schema
 
 # A concern is model-authored free text that re-enters a later prompt, which makes it
-# a prompt-injection path (see `docs/backend-plan.md` §12.1). Capping its length and
+# a prompt-injection path (see `docs/v0.0/backend/backend-plan.md` §12.1). Capping its length and
 # flattening its whitespace removes the two cheap ways to break out of a data section.
 MAX_CONCERN_CHARS = 160
 

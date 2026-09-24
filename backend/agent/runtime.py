@@ -11,7 +11,7 @@
 
 "Two segments" is not "two disconnected chats": `compose` is handed the observing
 segment's history, so the model that words the reply remembers how it reached its
-understanding and what it looked up. `docs/backend-plan.md` §3 has the verified trace.
+understanding and what it looked up. `docs/v0.0/backend/backend-plan.md` §3 has the verified trace.
 
 Why the kernel is not called from here: it must run exactly once whatever the model
 does, and in offline mode there is no loop for it to live inside. Keeping it in
@@ -60,7 +60,7 @@ from .usage import ModelUsage, from_result
 
 # How many recent messages are re-sent as context. A **bounded** window is what keeps
 # cost linear in conversation length rather than quadratic; see
-# `docs/backend-plan.md` §12.3, where the unbounded version is *cheaper* at ten turns
+# `docs/v0.0/backend/backend-plan.md` §12.3, where the unbounded version is *cheaper* at ten turns
 # and six times the price by three hundred. Treated as an invariant, not a constant to
 # tune casually: `backend/tests/test_agent_runtime.py` asserts the bound.
 CONTEXT_WINDOW = 6

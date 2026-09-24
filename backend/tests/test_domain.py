@@ -2,7 +2,7 @@
 """P1: `domain/` is the single source of truth for every wire string.
 
 The literal lists below are transcribed independently from
-`docs/api/interface-v1.md` §4.3 and §1.2. That duplication is the point: if an
+`docs/v0.0/api/interface-v1.md` §4.3 and §1.2. That duplication is the point: if an
 enum is renamed, reordered or extended, the comparison fails here rather than
 reaching a frontend that has no build step and no type checking to catch it.
 
@@ -16,7 +16,7 @@ from pathlib import Path
 
 DOMAIN = Path(__file__).resolve().parent.parent / "domain"
 
-# --- transcribed from docs/api/interface-v1.md §4.3 -----------------------
+# --- transcribed from docs/v0.0/api/interface-v1.md §4.3 -----------------------
 
 STATES = [
     "Cold Lead",
@@ -43,7 +43,7 @@ SIGNALS = [
 ]
 CASE_STATUSES = ["Open", "Taken Over", "Closed"]
 
-# --- transcribed from docs/api/interface-v1.md §1.2 and §5.7 -------------
+# --- transcribed from docs/v0.0/api/interface-v1.md §1.2 and §5.7 -------------
 
 ROLES = ["customer", "business"]
 AUTHORS = ["ai", "human", "system"]

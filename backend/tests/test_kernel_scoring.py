@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P2: the two-axis score, the qualification gate, and the priority matrix.
 
-Specification: `docs/backend-contract.md` gap register item 13.
+Specification: `docs/v0.0/backend/backend-contract.md` gap register item 13.
 
 The scenarios that open this file are the ones that justified the redesign. Run
 against the frozen build they produced:

@@ -2,7 +2,7 @@
 """Turn a `ProviderSpec` into something the runtime can call.
 
 This is the **only** module in the backend that constructs a model object, which is
-what keeps §4 rule 2 of `docs/backend-plan.md` true and executable: the agent
+what keeps §4 rule 2 of `docs/v0.0/backend/backend-plan.md` true and executable: the agent
 framework is an implementation detail of `agent/`, and
 `backend/tests/test_architecture.py` fails the build if the import appears anywhere
 else. `providers/` decides *what* to talk to and stays framework-free; this decides

@@ -4,7 +4,7 @@
 `resolve()` returns a `ProviderSpec` — the endpoint, the model name, the credential
 and the timeout, or the reason there is nothing to call. It deliberately does **not**
 return a constructed model object, because building one means importing the agent
-framework, and §4 rule 2 of `docs/backend-plan.md` gives that import to `agent/` and
+framework, and §4 rule 2 of `docs/v0.0/backend/backend-plan.md` gives that import to `agent/` and
 to no one else. `agent.model_factory` turns a spec into something callable.
 
 The split is worth stating plainly, because the two halves are easy to confuse:

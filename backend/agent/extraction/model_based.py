@@ -7,7 +7,7 @@ as an argument it must supply (and never asked to invent a transcript) and a
 proposal or violation from one run can never leak into the next.
 
 Three failure classes, kept distinguishable on the outcome and on the run
-record (`docs/backend-plan.md` §7):
+record (`docs/v0.0/backend/backend-plan.md` §7):
 
     model wrong         an out-of-enum value fails Pydantic validation and
                         surfaces as `UnexpectedModelBehavior` with the
@@ -189,7 +189,7 @@ def _model_violation(exc: UnexpectedModelBehavior) -> ModelViolation:
 
 
 def _usage_limits() -> UsageLimits:
-    # `docs/backend-plan.md` §12.3: a runaway tool loop is quadratic in the
+    # `docs/v0.0/backend/backend-plan.md` §12.3: a runaway tool loop is quadratic in the
     # number of tool calls, so it is capped before it can cost anything.
     steps = config.LLM_MAX_TOOL_STEPS
     return UsageLimits(request_limit=steps + 2, tool_calls_limit=steps)

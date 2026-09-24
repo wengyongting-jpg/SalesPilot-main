@@ -14,7 +14,7 @@ Two mechanisms are asserted against that:
     a value the domain rejects is recorded as a model contract violation naming it,
     never silently downgraded
 
-The third group covers red line 3 of `docs/backend-plan.md` §3: the prompt is a
+The third group covers red line 3 of `docs/v0.0/backend/backend-plan.md` §3: the prompt is a
 visibility boundary too, so nothing internal may reach the customer-reply prompt.
 """
 from __future__ import annotations
@@ -201,7 +201,7 @@ class TestModelContractViolations(unittest.TestCase):
 class TestConcernSanitisation(unittest.TestCase):
     """`main_concern` is model-authored free text that re-enters a later prompt.
 
-    That is a prompt-injection path, documented in `docs/backend-plan.md` §12.1.
+    That is a prompt-injection path, documented in `docs/v0.0/backend/backend-plan.md` §12.1.
     """
 
     def test_a_concern_is_length_capped(self):

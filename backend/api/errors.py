@@ -3,7 +3,7 @@
 
 `interface-v1.md` §4.5: there is no application-specific error envelope.
 Anything not mapped here is a program error and surfaces as FastAPI's own
-500 — `docs/backend-plan.md` §7's first failure class, never disguised.
+500 — `docs/v0.0/backend/backend-plan.md` §7's first failure class, never disguised.
 """
 from __future__ import annotations
 

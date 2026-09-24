@@ -1,12 +1,12 @@
 # SalesPilot dependencies.
-# The decision engine, rule-based RAG, SQLite persistence, analytics, CLI and
-# tests (unittest) run on the Python standard library only (Python >= 3.10).
+# The deterministic kernel and SQLite persistence use the Python standard
+# library. The current backend service also uses the dependencies below.
 # Install: py -3 -m pip install -r requirements.txt
 
 # Test runner (the suite itself also runs with stdlib unittest)
 pytest>=8.0
 
-# HTTP service layer (`py -3 run.py --serve`)
+# HTTP service layer (`py -3 -m backend --serve`)
 fastapi>=0.115
 uvicorn>=0.30
 
@@ -16,14 +16,10 @@ httpx>=0.27
 # ---- backend/ (the rebuild) ---------------------------------------------
 # Agent runtime: the tool-calling loop and structured outputs whose schemas are
 # generated from backend/domain/enums.py. Confined to backend/agent/ — see
-# docs/backend-plan.md §4 and backend/tests/test_architecture.py, which fails the
+# docs/v0.0/backend/backend-plan.md §4 and backend/tests/test_architecture.py, which fails the
 # build if it leaks into any other package.
 #
 # The `[openai]` extra pulls the OpenAI client, used for ANY OpenAI-compatible
 # endpoint including the organiser gateway. backend/domain/ and backend/kernel/
 # stay standard-library only and run with none of this installed.
 pydantic-ai-slim[openai]==2.46.0
-
-# Optional: real LLM reply generation in the frozen salespilot build
-# (`--llm`, SALESPILOT_LLM=openai)
-# openai>=1.40

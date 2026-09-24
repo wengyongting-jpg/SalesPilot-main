@@ -178,7 +178,7 @@ const toCase = (wire) => ({
  * reply error banners would then show to an operator.
  *
  * Duplicated from `frontend/customer/js/gateway/salespilot.js` — the two apps are
- * deliberately self-contained (see `.kiro/steering/tech.md`).
+ * deliberately self-contained (see `docs/v0.0/conventions/tech.md`).
  */
 function describeError(payload, fallback) {
   const detail = payload?.detail;
@@ -348,7 +348,7 @@ export function createSalesPilotGateway(config) {
 
       // One active case per opportunity, so the non-closed one is unambiguous.
       // Looked up unconditionally rather than only when `humanTakeover` is set:
-      // the two facts can disagree (item 14 in docs/backend-contract.md), and it
+      // the two facts can disagree (item 14 in docs/v0.0/backend/backend-contract.md), and it
       // is the disagreement the composer needs to see in order to explain it.
       const cases = await request(admin('/cases'));
       const linkedCase =

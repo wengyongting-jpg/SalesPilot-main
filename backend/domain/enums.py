@@ -12,7 +12,7 @@ seven of the eleven signals. The result was three escalation triggers that could
 never fire whenever a model was configured, with no error and no log line. Nothing
 in the code prevented it, so it happened.
 
-The contract for these strings is `docs/api/interface-v1.md` §4.3 and §1.2, and
+The contract for these strings is `docs/v0.0/api/interface-v1.md` §4.3 and §1.2, and
 `backend/tests/test_domain.py` compares the values against an independent
 transcription of it.
 """
@@ -113,7 +113,7 @@ class CaseStatus(str, Enum):
 
 
 # ---- The three message axes ----------------------------------------------
-# Three orthogonal questions, three fields. `docs/api/interface-v1.md` §1 records
+# Three orthogonal questions, three fields. `docs/v0.0/api/interface-v1.md` §1 records
 # what a single field answering two of them costs: `role: "agent"` made a human
 # representative's message read as a contradiction, and a reader had to consult a
 # second field to undo a confusion the first one created.
@@ -224,7 +224,7 @@ class Generation(str, Enum):
 
     `TEMPLATE` means no model was involved at all — the offline path. A reader must
     never be led to believe a template reply came from a model, which is why this
-    is reported rather than inferred. `docs/api/interface-v1.md` §5.7.
+    is reported rather than inferred. `docs/v0.0/api/interface-v1.md` §5.7.
     """
 
     LLM = "llm"

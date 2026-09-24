@@ -2,7 +2,7 @@
    Design tokens — admin console
 
    The spacing, radius, duration and easing scales are shared with the customer
-   app (.kiro/specs/customer-chat-ui/ux-spec.md §4 and §6) so the two surfaces
+   app (docs/v0.0/frontend/customer-chat-ui/ux-spec.md §4 and §6) so the two surfaces
    feel like one product. Colours diverge deliberately: the console is a dense
    data surface, not a messaging app.
 

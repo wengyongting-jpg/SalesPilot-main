@@ -94,7 +94,7 @@ def _run_one(service, customer_id: str, script: dict) -> None:
         print(_wrap("customer", text))
         generation = (payload.get("message") or {}).get("generation", "?")
         # The AI label is a compliance red line, not decoration: the assistant is
-        # never presented as a person. `.kiro/steering/product.md`.
+        # never presented as a person. `docs/v0.0/product/product.md`.
         print(_wrap(f"CareSure AI [{generation}]", payload.get("reply", "")))
         for line in _intelligence(payload):
             print(f"      {line}")

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P7: model access — the same conversation, with and without a model.
 
-Acceptance from `docs/backend-plan.md` §9 P7:
+Acceptance from `docs/v0.0/backend/backend-plan.md` §9 P7:
 
     1. With no key configured, a full conversation completes, every business
        message reports `generation: "template"`, and each run reports

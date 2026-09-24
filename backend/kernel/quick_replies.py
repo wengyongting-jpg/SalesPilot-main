@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Quick replies: the tappable suggestions offered under the assistant's message.
 
-Contract: `docs/api/interface-v1.md` §5.5. At most three, labels at most 24
+Contract: `docs/v0.0/api/interface-v1.md` §5.5. At most three, labels at most 24
 characters, an empty array meaning "render nothing", and stable ids so a suggestion
 can be logged and tested.
 

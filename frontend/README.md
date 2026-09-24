@@ -71,7 +71,7 @@ cd frontend
 node --test "tests/**/*.test.js"
 ```
 
-Current baseline: **283 tests, 65 suites**.
+Run the suite for the current baseline; older recorded counts may be stale.
 
 `package.json` exists *only* to declare `"type": "module"` so Node can import the
 apps' ES modules. It has no dependencies, nothing is ever installed, and browsers
@@ -88,7 +88,7 @@ precedent — rather than left private inside a view.
 anything depending on layout: scroll geometry, bubble tails, breakpoints, focus
 rings and the iframe handshake.
 
-Per `AGENTS.md` Rule 2, adding new tests needs the repository owner's agreement.
+Per [`AGENTS.md`](../AGENTS.md) Rule 2, adding new tests needs the repository owner's agreement.
 
 ## Structure
 
@@ -174,7 +174,9 @@ customer app.
 
 ## Conventions
 
-Full rules in `.kiro/steering/frontend-conventions.md`. The load-bearing ones:
+The active conventions are below. The former Kiro-era
+[`frontend-conventions.md`](../docs/v0.0/conventions/frontend-conventions.md)
+is retained as historical background, not an active instruction file.
 
 - **No business logic in the frontend.** State, signals, score, priority, next
   best action and escalation come from the backend and are displayed, never
@@ -183,12 +185,13 @@ Full rules in `.kiro/steering/frontend-conventions.md`. The load-bearing ones:
 - **All user-facing text lives in `strings.js`;** all colours, spacing, radii and
   durations live in `tokens.css`.
 - **No inline event handlers and no inline styles** in HTML.
-- **All untrusted text renders via `textContent`.** Message bodies, case
-  summaries, knowledge-base facts and model prompts are data, never markup.
+- **Treat all untrusted text as data.** Render plain text through `textContent`;
+  use the controlled Markdown renderer where formatting is required. Never
+  insert untrusted content directly as HTML.
 - **No WhatsApp trademarks**, logo, wordmark, font or notification sound. The
   assistant is always labelled as AI.
 - **One field, one meaning.** The counter for customer messages is
-  `customerMessageCount`, never `turns`; see `docs/api/interface-v1.md` §1.1.
+  `customerMessageCount`, never `turns`; see `docs/v0.0/api/interface-v1.md` §1.1.
 
 ## Known limitations
 
@@ -208,10 +211,8 @@ Full rules in `.kiro/steering/frontend-conventions.md`. The load-bearing ones:
 
 | Document | Purpose |
 | --- | --- |
-| `../AGENTS.md` | Working protocol for every contributor |
-| `../docs/api/interface-v1.md` | The authoritative frontend/backend contract |
-| `../docs/backend-contract.md` | Gap register: what the backend still owes, with tests |
-| `../docs/backend-handoff.md` | Track ownership and priorities |
-| `../docs/frontend-changelog.md` | What changed in each authorised update |
-| `../.kiro/specs/customer-chat-ui/` | Requirements, design, UX spec, tasks |
-| `../.kiro/specs/admin-console-ui/` | Requirements, design, tasks |
+| [AGENTS.md](../AGENTS.md) | Working protocol for every contributor |
+| [Documentation index](../docs/README.md) | Current work and historical archive map |
+| [Persistence repair plan](../docs/v1.0/persistence-repair-plan.md) | Current proposed backend/evaluation work |
+| [Interface v1](../docs/v0.0/api/interface-v1.md) | Frozen historical wire contract; verify current behavior in code |
+| [Frontend archive](../docs/v0.0/README.md) | Historical requirements, designs, and changelog |

@@ -2,7 +2,7 @@
 """Command-line entry point.
 
 Subcommands arrive with the phases that implement them (see
-`docs/backend-plan.md` §9). `--probe` is useful from P0 onward because knowing
+`docs/v0.0/backend/backend-plan.md` §9). `--probe` is useful from P0 onward because knowing
 what model access is actually configured is the first thing to establish.
 """
 from __future__ import annotations

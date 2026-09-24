@@ -3,7 +3,7 @@
 
 Continues the observing segment's conversation rather than starting a new one, so the
 model can select relevant approved facts using the customer's latest request. See
-`docs/backend-plan.md` §3.
+`docs/v0.0/backend/backend-plan.md` §3.
 
 No tools are offered in this segment. The model returns indices, not prose. The
 existing template peer renders the selected facts, preventing unsupported claims.

@@ -9,7 +9,7 @@
  *    of discipline (requirement 6.12).
  * 2. Telemetry is fetched by this console from the admin surface and joined on
  *    `clientMessageId`. It is never routed through the device
- *    (requirement 6.11) — see docs/api/interface-v1.md §3.
+ *    (requirement 6.11) — see docs/v0.0/api/interface-v1.md §3.
  * 3. Reconfiguration reloads the iframe with new query parameters rather than
  *    mutating a live transport. Rebuilding the gateway from scratch is the
  *    robust option, and the console itself never reloads (requirement 6.6).

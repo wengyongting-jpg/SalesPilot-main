@@ -23,7 +23,7 @@
  * ideal one: no idempotency, no quick replies, no incremental fetch. That keeps
  * the degraded paths — including the retry duplicate warning — on the exercised
  * code path instead of a path nobody sees until task 4. See
- * docs/backend-contract.md Part B.
+ * docs/v0.0/backend/backend-contract.md Part B.
  */
 import { createMessage } from '../store.js';
 

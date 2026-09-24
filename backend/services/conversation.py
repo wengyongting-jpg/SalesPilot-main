@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""One customer message, end to end — `docs/backend-plan.md` §3.
+"""One customer message, end to end — `docs/v0.0/backend/backend-plan.md` §3.
 
     1. observing segment    agent.extraction  → Detection, HandoffProposal
     2. kernel               plain Python, mandatory, exactly once, fixed order:

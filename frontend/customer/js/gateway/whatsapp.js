@@ -30,7 +30,7 @@
  * Note the difference from the SalesPilot backend: WhatsApp issues real delivery
  * receipts, so a future implementation could drive ticks from server events
  * instead of the client-observed milestones documented in
- * docs/backend-contract.md Part B item 5.
+ * docs/v0.0/backend/backend-contract.md Part B item 5.
  *
  * TODO(customer-chat-ui task 6): complete the documented stub. Implementation of
  * real sending is out of scope for this project.
