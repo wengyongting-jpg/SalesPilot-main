@@ -30,49 +30,10 @@ from typing import Any, Optional
 
 from ...domain.detection import HandoffProposal
 from ...knowledge.loader import KnowledgeBase
-from ...domain.detection import HandoffProposal
-from ...knowledge.loader import KnowledgeBase
 from ...observability.violations import ModelViolation
 
 
 @dataclass
-class ToolCall:
-    """One tool invocation, recorded for the agent run timeline.
-
-    `interface-v1.md` §1.1 is strict that a tool call means a call the *model chose*
-    to make. Fixed pipeline retrieval is not one and must never be counted here.
-    """
-
-    name: str
-    arguments: dict[str, Any]
-    result_chars: int
-
-
-@dataclass
-class ToolContext:
-    """State passed to every tool, so none needs to close over the opportunity."""
-
-    knowledge_base: Optional[KnowledgeBase] = None
-    opportunity: Optional[Any] = None
-    handoff_proposal: Optional[HandoffProposal] = None
-    question_field: Optional[str] = None
-    calls: list[ToolCall] = field(default_factory=list)
-
-    def record(self, tool_name: str, arguments: dict[str, Any], result: str) -> str:
-        """Record a tool invocation and return the result."""
-        self.calls.append(
-            ToolCall(name=tool_name, arguments=arguments, result_chars=len(result))
-        )
-        return result
-
-
-# Import tool functions after ToolContext is defined to avoid circular import
-from .knowledge import compare_products, list_products, lookup_product_fact
-from .handoff import request_human_handoff
-from .opportunity import conversation_summary
-
-# Alias for backwards compatibility with tests
-get_conversation_summary = conversation_summary
 class ToolCall:
     """One tool invocation, recorded for the agent run timeline.
 
@@ -102,9 +63,7 @@ class ToolContext:
     violations: list[ModelViolation] = field(default_factory=list)
 
     def record(self, name: str, arguments: dict[str, Any], result: str) -> str:
-        self.calls.append(
-            ToolCall(name=name, arguments=arguments, result_chars=len(result))
-        )
+        self.calls.append(ToolCall(name=name, arguments=arguments, result_chars=len(result)))
         return result
 
     def coerce(self, raw: Any, enum_cls, field_name: str):
@@ -135,3 +94,12 @@ class ToolContext:
     @property
     def call_count(self) -> int:
         return len(self.calls)
+
+
+# Import tool functions after ToolContext is defined to avoid circular import
+from .knowledge import compare_products, list_products, lookup_product_fact
+from .handoff import request_human_handoff
+from .opportunity import conversation_summary
+
+# Alias for backwards compatibility with tests
+get_conversation_summary = conversation_summary

@@ -10,21 +10,22 @@ disabled three HITL triggers. A declared shared contract is the fix.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional, Protocol
+from typing import Any, Literal, Optional, Protocol, runtime_checkable
 
 from ...domain.detection import Detection, HandoffProposal
 from ...domain.message import Message
 from ...observability import RunRecorder
+from ...observability.violations import ModelViolation
 
 
 @dataclass
 class ExtractionOutcome:
     """What one extraction call produced, and how.
 
-    `source`, `violation` and `unavailable` exist so a caller (eventually
+    `source`, `violations` and `unavailable` exist so a caller (eventually
     `services`) can report a degraded run without inspecting the detection for
     clues -- exactly the distinction `docs/backend-plan.md` §7 draws between
-    "model unavailable" (`unavailable`) and "model wrong" (`violation`).
+    "model unavailable" (`unavailable`) and "model wrong" (`violations`).
 
     `handoff` is the model's proposal, if it made one; the kernel decides.
     `trace` is the framework's own message list from a model run, kept opaque
@@ -32,13 +33,14 @@ class ExtractionOutcome:
     """
 
     detection: Detection
-    source: Literal["llm", "rule"]
-    violation: Optional[str] = None
+    source: Literal["llm", "rules"]
+    violations: list[ModelViolation] = field(default_factory=list)
     unavailable: Optional[str] = None
     handoff: Optional[HandoffProposal] = None
     trace: list[Any] = field(default_factory=list)
 
 
+@runtime_checkable
 class Extractor(Protocol):
     def extract(
         self,
@@ -76,7 +78,7 @@ class RuleExtractor:
         recorder: Optional[RunRecorder] = None,
     ) -> ExtractionOutcome:
         if recorder is None:
-            return ExtractionOutcome(detection=rules.extract(text, context), source="rule")
+            return ExtractionOutcome(detection=rules.extract(text, context), source="rules")
         with recorder.step("extraction", "rule") as step:
             detection = rules.extract(text, context)
             if self._offline:
@@ -85,7 +87,7 @@ class RuleExtractor:
                 step.note(f"intent={detection.intent.value} product={detection.product.value}")
         return ExtractionOutcome(
             detection=detection,
-            source="rule",
+            source="rules",
             unavailable=OFFLINE_REASON if self._offline else None,
         )
 

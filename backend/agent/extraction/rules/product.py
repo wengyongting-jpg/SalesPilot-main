@@ -17,7 +17,12 @@ _KEYWORDS: list[tuple[Product, tuple[str, ...]]] = [
         "sme", "business", "workforce", "employer", "group insurance", "team",
     )),
     (Product.PLUS, (
-        "plus", "private hospital", "private ward", "premium plan", "top tier",
+        # Deliberately no bare "private hospital": it is a coverage-tier
+        # descriptor a customer can use while stating a family or corporate
+        # need ("private hospital cover for me and my two children" is a
+        # family need, not a Plus-specific request), so it must not outrank
+        # an explicit family/corporate member reference checked below.
+        "plus", "private ward", "premium plan", "top tier",
         "comprehensive", "best coverage", "a ward", "specialist of my choice",
     )),
     (Product.FAMILY, (

@@ -20,43 +20,46 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
         "someone contact me", "consultant to contact", "speak to an agent",
         "talk to an agent", "to a human", "with a human", "speak to a real",
         "speak with someone", "talk to someone", "human being",
+        "manager to resolve", "speak to a manager", "want a manager",
+        "someone to confirm",
     )),
     (Intent.COMPLAINT, (
         "complaint", "complain", "not happy", "unhappy", "frustrated",
         "want to cancel", "cancel my policy", "dispute", "denied claim",
-        "claim was rejected",
+        "claim was rejected", "unacceptable", "nobody replies", "no response",
     )),
     (Intent.UNDERWRITING, (
         "pre-existing", "pre existing", "underwrit", "medical history",
         "diagnosed", "my condition", "chronic", "asthma", "diabetes",
+        "existing condition",
     )),
     (Intent.APPLICATION, (
         "how do i apply", "i want to buy", "want to buy", "apply", "sign up",
         "enrol", "enroll", "register", "documents do i need", "documents i need",
-        "proceed with", "ready to get", "take up the plan", "buy the plan",
-        "purchase the plan", "how can i pay", "when can the policy start",
-        "how to pay", "policy start",
+        "proceed with", "want to proceed", "ready to get", "take up the plan",
+        "buy the plan", "purchase the plan", "how can i pay",
+        "when can the policy start", "how to pay", "policy start",
+        "submit my application", "where do i submit", "what are the steps",
     )),
     (Intent.COMPARISON, (
         "cheaper", "another insurer", "other insurer", "competitor", "compare",
-        "versus", " vs ", "difference between", "different from", "better than",
-        "how are you different", "which plan",
+        "comparing", "versus", " vs ", "difference between", "different from",
+        "better than", "how are you different", "which plan",
     )),
-    (Intent.CORPORATE_NEED, (
-        "employee", "employees", "company", "companies", "sme", "business",
-        "corporate", "staff", "workforce", "employer", "group insurance",
-    )),
-    (Intent.FAMILY_NEED, (
-        "spouse", "wife", "husband", "child", "children", "daughter", "son",
-        "family", "add my", "dependant", "dependent",
-    )),
+    # Specific factual questions (claims, waiting period, eligibility, payment,
+    # price) are checked before the family/corporate "orientation" intents
+    # below them: a question naming a plan by its product name ("what does the
+    # Family plan cover?", "is there a waiting period for Family cover?") is
+    # about that specific thing, not a fresh statement of family/corporate
+    # need, even though it mentions "family"/"corporate".
     (Intent.CLAIMS, (
         "claim", "claims", "reimburse", "reimbursement", "payout",
         "submit a claim",
     )),
     (Intent.WAITING_PERIOD, (
         "waiting period", "how soon can i", "when can i claim",
-        "effective immediately",
+        "effective immediately", "start using", "when can i use",
+        "when does cover start", "when will i be covered",
     )),
     (Intent.ELIGIBILITY, (
         "eligible", "eligibility", "qualify", "age limit", "citizen",
@@ -64,11 +67,27 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
     )),
     (Intent.PAYMENT, (
         "medisave", "pay by", "payment method", "monthly", "instalment",
-        "how to pay", "cash",
+        "how to pay", "cash", "paid successfully", "submitted and paid",
+        "completed payment", "completed the payment",
     )),
     (Intent.PRICE, (
-        "price", "cost", "how much", "premium", "rate", "rates", "expensive",
-        "cheap", "cheapest", "quote", "quotation", "s$", "dollar",
+        "price", "cost", "how much", "premium", "the rate", "your rate",
+        "insurance rate", "rates for", "expensive", "cheap", "cheapest",
+        "quote", "quotation", "s$", "dollar",
+    )),
+    (Intent.CORPORATE_NEED, (
+        # Deliberately no bare "corporate": "the corporate plan" names a
+        # product, it is not by itself a statement of corporate need, and a
+        # bare match here was intercepting factual questions about a named
+        # corporate plan before they ever reached coverage/price above.
+        "employee", "employees", "company", "companies", "sme", "business",
+        "staff", "workforce", "employer", "group insurance",
+    )),
+    (Intent.FAMILY_NEED, (
+        # Deliberately no bare "family", for the same reason: "the Family
+        # plan"/"Family cover" names a product.
+        "spouse", "wife", "husband", "child", "children", "daughter", "son",
+        "add my", "dependant", "dependent",
     )),
     (Intent.COVERAGE, (
         "cover", "coverage", "hospital", "benefit", "benefits", "limit",
@@ -76,6 +95,7 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
         "protection", "insurance", "health insurance", "learn about",
         "what is", "tell me about", "more about", "introduce", "what plans",
         "what products", "what options", "basic info", "basic information",
+        "exclusion", "exclusions",
         # Direct plan interest. These advance a cold lead, but they are interest
         # rather than preparation, so they must not be read as an application —
         # otherwise "I want Plus" jumps straight to High Intent.
@@ -108,10 +128,23 @@ _TOPIC_TO_INTENT = {
 
 _SHORT_MESSAGE_WORDS = 4
 
+# "Apply" is the one APPLICATION trigger word that also appears in ordinary
+# clauses about a plan's terms — "these exclusions apply to..." is a coverage
+# question, not a request to submit an application. Narrow to that one
+# collision rather than dropping bare "apply", which real application
+# phrasing ("...and apply before the school holidays") still needs.
+_APPLICATION_FALSE_POSITIVES = (
+    "exclusions apply", "exclusion applies", "terms apply", "conditions apply",
+)
+
 
 def detect(text: str, context: list | None = None) -> Intent:
     normalised = f" {text.lower().strip()} "
     for intent, phrases in _PHRASES:
+        if intent is Intent.APPLICATION and any(
+            fp in normalised for fp in _APPLICATION_FALSE_POSITIVES
+        ):
+            continue
         if any(phrase in normalised for phrase in phrases):
             return intent
 

@@ -79,8 +79,8 @@ def get_conversation(
         human_takeover=opportunity.human_takeover,
         messages=[project_message(message_to_dict(m)) for m in messages],
         quick_replies=(
-            [QuickReply(id="handoff-confirm", label="Confirm"),
-             QuickReply(id="handoff-cancel", label="Cancel")]
+            [QuickReply(id="handoff_confirm", label="Confirm"),
+             QuickReply(id="handoff_cancel", label="Cancel")]
             if opportunity.pending_handoff_reason else []
         ),
         customer_question=opportunity_to_dict(opportunity)["customer_question"],

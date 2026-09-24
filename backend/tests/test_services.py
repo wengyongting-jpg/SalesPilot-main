@@ -37,7 +37,7 @@ NOW = datetime(2026, 9, 22, 12, 0, 0)
 
 
 def service(repo=None, *, now=None, extractor=None, composer=None):
-    from backend.agent.extraction.rules import RuleExtractor
+    from backend.agent.extraction import RuleExtractor
     from backend.agent.reply.template import TemplateComposer
     from backend.services.conversation import ConversationService
     from backend.storage.memory import InMemoryRepository
@@ -45,7 +45,7 @@ def service(repo=None, *, now=None, extractor=None, composer=None):
     moment = now or NOW
     return ConversationService(
         repo or InMemoryRepository(),
-        extractor=extractor or RuleExtractor(),
+        extractor=extractor or RuleExtractor(offline=True),
         composer=composer or TemplateComposer(),
         now=lambda: moment
     )
@@ -375,15 +375,28 @@ class TestRepReply(unittest.TestCase):
 
         svc = self._service_under_takeover()
         before = svc.repo.get_opportunity("C-1")
+        # `InMemoryRepository.get_opportunity` returns the live object, not a
+        # copy, so `before` and the `after` fetched below are the same
+        # instance — anything read from `before` *after* the reply call
+        # already reflects it. The scalar fields are unaffected by a rep
+        # reply either way (that is what this test asserts), but the message
+        # count must be captured before the mutation to mean anything.
+        before_message_count = len(before.messages)
+        before_customer_message_count = before.customer_message_count
+        before_state = before.state
+        before_score_total = before.score.total
+        before_signals = list(before.signals)
+        before_score_history_len = len(before.score_history)
+
         RepReplyService(svc.repo).reply("C-1", text="Anything at all", rep_name="Alex")
         after = svc.repo.get_opportunity("C-1")
 
-        self.assertEqual(before.customer_message_count, after.customer_message_count)
-        self.assertIs(before.state, after.state)
-        self.assertEqual(before.score.total, after.score.total)
-        self.assertEqual(before.signals, after.signals)
-        self.assertEqual(len(before.score_history), len(after.score_history))
-        self.assertEqual(len(before.messages) + 1, len(after.messages))
+        self.assertEqual(before_customer_message_count, after.customer_message_count)
+        self.assertIs(before_state, after.state)
+        self.assertEqual(before_score_total, after.score.total)
+        self.assertEqual(before_signals, after.signals)
+        self.assertEqual(before_score_history_len, len(after.score_history))
+        self.assertEqual(before_message_count + 1, len(after.messages))
 
     def test_an_unknown_conversation_is_reported_as_missing(self):
         from backend.services.rep_reply import RepReplyService, UnknownOpportunity
@@ -643,8 +656,8 @@ class TestHandoffConfirmation(unittest.TestCase):
         self.assertIn("Cancel", labels)
         # Verify they have IDs
         ids = [c.id for c in chips]
-        self.assertIn("handoff-confirm", ids)
-        self.assertIn("handoff-cancel", ids)
+        self.assertIn("handoff_confirm", ids)
+        self.assertIn("handoff_cancel", ids)
 
     def test_escalation_sets_pending_instead_of_creating_case(self):
         """When escalation is triggered, set pending_handoff_reason instead of creating case."""

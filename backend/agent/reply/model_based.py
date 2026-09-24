@@ -58,9 +58,15 @@ class ModelComposer:
                 output_type=FactSelection,
                 system_prompt=policy.fact_selection_system_prompt(),
             )
+            # `request.history` is a list of domain `Message` objects, not
+            # pydantic-ai's own `ModelMessage` type — passing it as
+            # `message_history=` crashes with an `AttributeError` on the
+            # first field pydantic-ai tries to read off it, as soon as there
+            # is any prior turn at all. The fact-selection prompt is
+            # self-contained (the approved facts and the customer's own
+            # concern), so no history needs to travel with this call.
             result = agent.run_sync(
                 prompt,
-                message_history=request.history or None,
                 usage_limits=self.usage_limits,
             )
             indices = list(dict.fromkeys(
@@ -86,11 +92,15 @@ class ModelComposer:
             )
             return ReplyOutcome(
                 text=rendered.text,
-                generation=Generation.TEMPLATE,
+                # The wording is the deterministic renderer's, but a live model
+                # call chose which approved facts to use — the customer-facing
+                # `generation` field means "did a model participate this turn",
+                # not "did a model author every word", so this is `LLM`, not
+                # `TEMPLATE`. `interface-v1.md` §5.7 and every other composer in
+                # this codebase report it on that same basis.
+                generation=Generation.LLM,
                 history=list(result.all_messages()),
                 usage=usage,
-                # Selection ran through the model; the words came from the approved
-                # facts and the existing deterministic renderer.
                 degraded=usage is None,
                 degradation_reason=(
                     None if usage is not None else

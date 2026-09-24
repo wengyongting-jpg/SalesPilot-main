@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """Model-based extraction: the pydantic-ai peer of `extraction.rules`.
 
-A fresh `pydantic_ai.Agent` is built per call rather than reused across turns:
-the tools it registers close over this call's own trimmed history and its
-own handoff-proposal slot, so the model is never asked to supply the
-transcript as an argument (which would invite it to invent one) and a
-proposal from one run can never leak into the next.
+A `ToolContext` is built fresh per call and bound to each tool function via
+`functools.partial` before registration, so the model is never offered `context`
+as an argument it must supply (and never asked to invent a transcript) and a
+proposal or violation from one run can never leak into the next.
 
 Three failure classes, kept distinguishable on the outcome and on the run
 record (`docs/backend-plan.md` §7):
@@ -13,7 +12,7 @@ record (`docs/backend-plan.md` §7):
     model wrong         an out-of-enum value fails Pydantic validation and
                         surfaces as `UnexpectedModelBehavior` with the
                         `ValidationError` as its cause; recorded as a named
-                        contract violation, never silently downgraded
+                        `ModelViolation`, never silently downgraded
     model unavailable   no endpoint, timeout, rate limit, usage guard tripped;
                         recorded as `unavailable`, rule peer takes the turn
     program error       anything else propagates
@@ -22,6 +21,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from functools import partial
 from typing import Optional
 
 from pydantic import ValidationError
@@ -31,15 +31,18 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
 from ... import config
-from ...domain.detection import Detection, HandoffProposal
+from ...domain.detection import Detection
 from ...domain.enums import Intent
 from ...domain.message import Message
+from ...knowledge import loader
 from ...observability import RunRecorder, StepHandle
-from .. import policy, telemetry
+from ...observability.violations import ModelViolation
+from .. import policy, schema, telemetry
 from ..schema import ExtractionOutput
 from ..tools import (
+    ToolContext,
     compare_products,
-    get_conversation_summary,
+    conversation_summary,
     list_products,
     lookup_product_fact,
     request_human_handoff,
@@ -67,19 +70,18 @@ def extract(
 ):
     from . import ExtractionOutcome  # deferred: avoids a circular import at load time
 
-    trimmed = policy.trim_history(context or [])
-    proposal: list[HandoffProposal] = []
+    tool_context = ToolContext(kb=loader.load())
     agent = Agent(
         model,
         output_type=ExtractionOutput,
         system_prompt=policy.extraction_system_prompt(),
         retries=1,
     )
-    agent.tool_plain(lookup_product_fact)
-    agent.tool_plain(compare_products)
-    agent.tool_plain(list_products)
-    agent.tool_plain(_bind_summary_tool(trimmed), name="get_conversation_summary")
-    agent.tool_plain(_bind_handoff_tool(proposal), name="request_human_handoff")
+    agent.tool_plain(_bind(lookup_product_fact, tool_context), name="lookup_product_fact")
+    agent.tool_plain(_bind(compare_products, tool_context), name="compare_products")
+    agent.tool_plain(_bind(list_products, tool_context), name="list_products")
+    agent.tool_plain(_bind(conversation_summary, tool_context), name="get_conversation_summary")
+    agent.tool_plain(_bind(request_human_handoff, tool_context), name="request_human_handoff")
 
     # The deterministic read, computed once and reused below: `solicitation`
     # is always taken from here regardless of which branch fires (see
@@ -95,13 +97,13 @@ def extract(
         try:
             result = agent.run_sync(text, usage_limits=_usage_limits())
         except UnexpectedModelBehavior as exc:
-            violation = _describe_violation(exc)
-            step.degrade(violation)
-            return ExtractionOutcome(detection=rule_based, source="rule", violation=violation)
+            violation = _model_violation(exc)
+            step.degrade(violation.describe())
+            return ExtractionOutcome(detection=rule_based, source="rules", violations=[violation])
         except telemetry.UNAVAILABLE_ERRORS as exc:
             reason = telemetry.describe_unavailable(exc)
             step.degrade(reason)
-            return ExtractionOutcome(detection=rule_based, source="rule", unavailable=reason)
+            return ExtractionOutcome(detection=rule_based, source="rules", unavailable=reason)
 
         messages = result.all_messages()
         if recorder is not None:
@@ -134,12 +136,43 @@ def extract(
         genuine_enquiry=output.genuine_enquiry,
         solicitation=solicitation,
     )
+    handoff = tool_context.handoff if tool_context.handoff.requested else None
     return ExtractionOutcome(
         detection=detection,
         source="llm",
-        handoff=proposal[0] if proposal else None,
+        violations=list(tool_context.violations),
+        handoff=handoff,
         trace=list(messages),
     )
+
+
+def _bind(fn, tool_context: ToolContext):
+    """Bind `tool_context` as `fn`'s first argument for tool registration.
+
+    `functools.partial` (unlike a plain closure) is what makes
+    `inspect.signature()` correctly drop the bound first parameter, so
+    pydantic-ai builds the model-facing schema from the *remaining*
+    arguments only — the model is never offered `context` as something it
+    must supply. `partial` objects have no `__name__`/`__doc__` of their
+    own, which pydantic-ai needs for the tool's registry key and
+    description, so both are copied across explicitly.
+    """
+    bound = partial(fn, tool_context)
+    bound.__name__ = fn.__name__
+    bound.__qualname__ = fn.__qualname__
+    bound.__doc__ = fn.__doc__
+    return bound
+
+
+def _model_violation(exc: UnexpectedModelBehavior) -> ModelViolation:
+    cause = exc.__cause__
+    if isinstance(cause, ValidationError) and cause.errors():
+        error = cause.errors()[0]
+        field_name = str(error["loc"][0]) if error["loc"] else "output"
+        value = error.get("input")
+        allowed = schema.allowed_values().get(field_name, [])
+        return ModelViolation(field=field_name, value=str(value), allowed=allowed)
+    return ModelViolation(field="output", value=str(exc), allowed=[])
 
 
 def _usage_limits() -> UsageLimits:
@@ -147,35 +180,3 @@ def _usage_limits() -> UsageLimits:
     # number of tool calls, so it is capped before it can cost anything.
     steps = config.LLM_MAX_TOOL_STEPS
     return UsageLimits(request_limit=steps + 2, tool_calls_limit=steps)
-
-
-def _bind_summary_tool(history: list[Message]):
-    def get_conversation_summary_tool() -> str:
-        """Recap of the conversation so far, most recent messages only."""
-        return get_conversation_summary(history)
-
-    return get_conversation_summary_tool
-
-
-def _bind_handoff_tool(slot: list[HandoffProposal]):
-    def request_human_handoff_tool(reason: str) -> str:
-        """Propose that a person take over this conversation, and say why.
-
-        This is a proposal only; whether a handover actually happens is
-        decided elsewhere.
-        """
-        slot.clear()
-        slot.append(request_human_handoff(reason))
-        return "Handover proposed. Continue with your observations."
-
-    return request_human_handoff_tool
-
-
-def _describe_violation(exc: UnexpectedModelBehavior) -> str:
-    cause = exc.__cause__
-    if isinstance(cause, ValidationError) and cause.errors():
-        error = cause.errors()[0]
-        field = ".".join(str(part) for part in error["loc"])
-        value = error.get("input")
-        return f"model returned {field}={value!r}, not a member of the domain enum → fell back to rules"
-    return f"model output failed contract validation → fell back to rules ({exc})"

@@ -28,20 +28,33 @@ _PHRASES: list[tuple[Signal, tuple[str, ...]]] = [
     (Signal.WITHDRAWAL, (
         "won't buy", "wont buy", "don't want", "do not want", "not interested",
         "no longer interested", "decided not to", "not buying",
-        "cancel my application", "forget it", "never mind", "changed my mind",
-        "call it off", "back out", "not going to buy", "drop it", "pass on this",
-        "no longer want", "don't want the plan", "do not want the plan",
-        "don't want it anymore", "decided not to purchase", "decided not to buy",
-        "won't purchase", "wont purchase",
+        "cancel my application", "cancel my policy", "forget it", "never mind",
+        "changed my mind", "call it off", "back out", "not going to buy",
+        "drop it", "pass on this", "no longer want", "don't want the plan",
+        "do not want the plan", "don't want it anymore",
+        "decided not to purchase", "decided not to buy", "won't purchase",
+        "wont purchase",
+        # A specific, multi-month deferral reads differently from a vague
+        # "let me think about it": without this, the state machine still
+        # (correctly) moves the opportunity to Dormant/Lost via postponement,
+        # but with no Withdrawal signal the next-best-action for that state
+        # is still NURTURE — "ask one question that helps narrow down what
+        # they need" — which means pushing a follow-up question on someone
+        # who just asked for months of space. Withdrawn's guidance
+        # ("acknowledge warmly, do not attempt to persuade") fits what they
+        # actually asked for.
+        "for a few months", "for several months", "for months", "for a year",
+
     )),
     (Signal.CONVERSION, (
-        "completed the payment", "made the payment", "signed up", "i bought",
-        "already purchased", "done the application", "policy issued",
-        "completed my application", "completed the application",
+        "completed the payment", "completed payment", "made the payment",
+        "signed up", "i bought", "already purchased", "done the application",
+        "policy issued", "completed my application", "completed the application",
         "completed my payment", "bought the plan", "purchased the plan",
         "i've bought", "ive bought", "have bought", "have purchased",
         "finished the application", "finished my application",
-        "submitted my application and paid", "i have paid", "i've paid",
+        "submitted my application and paid", "submitted and paid",
+        "paid successfully", "i have paid", "i've paid",
     )),
     (Signal.HUMAN_REQUEST, (
         "speak to someone", "speak to a person", "talk to a human", "human agent",
@@ -49,10 +62,13 @@ _PHRASES: list[tuple[Signal, tuple[str, ...]]] = [
         "someone contact me", "speak to a human", "talk to a person",
         "speak to an agent", "talk to an agent", "to a human", "with a human",
         "speak to a real", "speak with someone", "talk to someone", "human being",
+        "manager to resolve", "speak to a manager", "want a manager",
+        "someone to confirm",
     )),
     (Signal.NEGOTIATION, (
         "discount", "negotiate", "negotiation", "negotiable",
-        "match their price", "match the price", "match their quote", "price match",
+        "match their price", "match the price", "match that price",
+        "match your price", "match their quote", "price match",
         "beat their price", "better rate", "better price", "better offer",
         "better deal", "lower the premium", "lower the price", "lower price",
         "reduce the price", "reduce the premium", "cheaper for me",
@@ -61,40 +77,47 @@ _PHRASES: list[tuple[Signal, tuple[str, ...]]] = [
     )),
     (Signal.COMPLIANCE_RISK, (
         "pre-existing", "pre existing", "underwrit", "medical history",
-        "diagnosed", "my condition", "chronic", "claim dispute",
+        "diagnosed", "my condition", "existing condition", "chronic",
+        "asthma", "diabetes", "had surgery", "claim dispute",
         "claim was denied", "claim rejected", "custom quote",
         "personalised quote", "personalized quote",
     )),
     (Signal.PURCHASE, (
         "how do i apply", "apply", "sign up", "enrol", "enroll", "register",
         "documents do i need", "documents i need", "buy", "purchase",
-        "proceed with", "ready to get", "take up", "how can i pay",
-        "when can the policy start", "how to pay", "want to start this week",
+        "proceed with", "want to proceed", "ready to get", "take up",
+        "how can i pay", "when can the policy start", "how to pay",
+        "want to start this week", "i have chosen", "i've chosen",
+        "chosen the plan", "i will sign", "sign today",
     )),
     (Signal.PURCHASE_PREPARATION, (
         "what documents", "documents do i need", "documents i need",
         "how long does the application", "medical check", "medical exam",
         "start date", "when does cover start", "when can the policy start",
         "application steps", "steps to apply", "what do you need from me to apply",
+        "submit my application", "where do i submit", "what are the steps",
     )),
     (Signal.HESITATION, (
         "expensive", "too pricey", "pricey", "too much", "cheaper",
         "think about", "let me think", "not sure", "maybe later", "hold off",
         "hesitate", "put it off", "some time to decide", "discuss with",
-        "discuss it with", "need to discuss",
+        "discuss it with", "need to discuss", "not ready",
+        "more than i expected", "than i expected",
+        "does not answer my question", "doesn't answer my question",
     )),
     (Signal.COMPETITIVE, (
         "cheaper", "another insurer", "other insurer", "competitor", "compare",
-        "versus", " vs ", "different from", "better deal",
+        "comparing", "versus", " vs ", "different from", "better deal",
         "how are you different",
     )),
     (Signal.EXPANSION_FAMILY, (
         "add my child", "add my spouse", "add my wife", "add my husband",
         "add my daughter", "add my son", "include my child", "cover my family",
-        "my child", "my spouse", "my wife", "my husband", "my kids",
-        "can i add", "wife join", "child join", "have a child", "have a kid",
-        "have a daughter", "have a son", "a child", "i have children",
-        "have kids", "with a kid", "newborn", "expecting", "new baby",
+        "my child", "my children", "my spouse", "my wife", "my husband",
+        "my kids", "can i add", "wife join", "child join", "have a child",
+        "have a kid", "have a daughter", "have a son", "a child",
+        "i have children", "have kids", "with a kid", "newborn", "expecting",
+        "new baby",
     )),
     (Signal.EXPANSION_CORPORATE, (
         "my employees", "our employees", "our staff", "my staff", "my company",
@@ -104,6 +127,7 @@ _PHRASES: list[tuple[Signal, tuple[str, ...]]] = [
 
 POSTPONE_PHRASES = (
     "later", "think about", "some time", "hold off", "put it off", "not now",
+    "next year", "revisit this", "revisit next",
 )
 
 CANCEL_PHRASES = (
@@ -120,9 +144,19 @@ SOLICITATION_PHRASES = (
     "limited offer", "limited time offer", "best price guaranteed",
     "insurance leads", "generate leads", "seo", "marketing services",
     "bulk discount for you", "wholesale",
+    # A genuine customer asking for a person wants *our* customer-facing team
+    # about their own case ("a manager", "someone in charge"). Asking to
+    # reach our marketing/sales/procurement contact instead is the B2B-spam
+    # pattern of angling for a pitch meeting, not seeking help buying cover.
+    "your marketing manager", "your marketing team", "marketing manager call",
+    "your procurement", "your purchasing department",
 )
 
 _URL = re.compile(r"(https?://|www\.|\b[a-z0-9-]+\.(?:com|net|org|io|shop|xyz)\b)")
+
+# "my two children"/"my three kids": a quantifier between "my" and the family
+# word defeats the literal "my child"/"my children" phrases above.
+_FAMILY_COUNT = re.compile(r"\bmy\s+\w+\s+(child|children|kids?|daughters?|sons?)\b")
 
 # Words that indicate a genuine interest in being insured, used only to avoid
 # mislabelling a real customer who happens to mention a website.
@@ -148,6 +182,9 @@ def detect(
         if any(phrase in normalised for phrase in phrases):
             signals.append(signal)
 
+    if _FAMILY_COUNT.search(normalised) and Signal.EXPANSION_FAMILY not in signals:
+        signals.append(Signal.EXPANSION_FAMILY)
+
     # P0-2: an explicit withdrawal outranks the purchase wording inside it.
     if Signal.WITHDRAWAL in signals:
         signals = [
@@ -171,6 +208,17 @@ def detect(
         and Signal.EXPANSION_FAMILY not in signals
     ):
         signals.append(Signal.EXPANSION_FAMILY)
+
+    # The corporate mirror of the family fallback above: "cover for 85
+    # employees" is a corporate expansion need even though it never says "my
+    # employees"/"our staff" — the explicit-phrase list only catches an
+    # existing customer adding headcount, not a fresh corporate enquiry.
+    if (
+        product is Product.CORPORATE
+        and intent in (Intent.CORPORATE_NEED, Intent.APPLICATION)
+        and Signal.EXPANSION_CORPORATE not in signals
+    ):
+        signals.append(Signal.EXPANSION_CORPORATE)
 
     # A bare "yes" carries purchase intent only if the assistant had just been
     # talking about applying. Without the context it means nothing.

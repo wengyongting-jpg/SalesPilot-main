@@ -118,73 +118,57 @@ def to_detection(output: ExtractionOutput) -> Detection:
     )
 
 
-def parse(payload: dict, *, customer_text: str = "") -> ExtractionOutput:
+def parse(payload: dict, *, customer_text: str = "") -> tuple[Detection, list[ModelViolation]]:
     """Lenient parse that records violations and falls back.
 
-    Used when the model returned something outside the schema. The violation is
-    recorded (never silent) and a safe fallback is substituted.
+    Used for a raw payload that has already come back wrong — a value outside the
+    schema is recorded as a `ModelViolation` naming the offending field and value
+    (never silent) and a safe fallback is substituted, so the turn is never lost
+    over one bad field.
     """
     violations: list[ModelViolation] = []
 
-    # Parse intent with fallback
-    intent_str = payload.get("intent", "generic")
+    intent_str = payload.get("intent", Intent.GENERIC.value)
     try:
         intent = Intent(intent_str)
     except ValueError:
         violations.append(
-            ModelViolation(
-                field="intent",
-                invalid_value=intent_str,
-                allowed_values=[m.value for m in Intent],
-                context=customer_text[:100],
-            )
+            ModelViolation(field="intent", value=str(intent_str), allowed=[m.value for m in Intent])
         )
         intent = Intent.GENERIC
 
-    # Parse product with fallback
-    product_str = payload.get("product", "unknown")
+    product_str = payload.get("product", Product.UNKNOWN.value)
     try:
         product = Product(product_str)
     except ValueError:
         violations.append(
-            ModelViolation(
-                field="product",
-                invalid_value=product_str,
-                allowed_values=[m.value for m in Product],
-                context=customer_text[:100],
-            )
+            ModelViolation(field="product", value=str(product_str), allowed=[m.value for m in Product])
         )
         product = Product.UNKNOWN
 
-    # Parse signals with fallback
-    signals_raw = payload.get("signals", [])
     signals: list[Signal] = []
-    for sig_str in signals_raw:
+    for raw in payload.get("signals", []):
         try:
-            signals.append(Signal(sig_str))
+            signals.append(Signal(raw))
         except ValueError:
             violations.append(
-                ModelViolation(
-                    field="signals",
-                    invalid_value=sig_str,
-                    allowed_values=[m.value for m in Signal],
-                    context=customer_text[:100],
-                )
+                ModelViolation(field="signals", value=str(raw), allowed=[m.value for m in Signal])
             )
 
-    # Record violations if any occurred
-    if violations:
-        from ..observability.recorder import record_violations
-        record_violations(violations)
+    concerns = payload.get("concerns")
+    if concerns is None:
+        single = payload.get("concern")
+        concerns = [single] if single else []
 
-    return ExtractionOutput(
+    detection = Detection(
         intent=intent,
         product=product,
         signals=signals,
-        concerns=payload.get("concerns", []),
+        concerns=concerns,
         genuine_enquiry=payload.get("genuine_enquiry", True),
         solicitation=payload.get("solicitation", False),
         restricted=payload.get("restricted", False),
         cancellation=payload.get("cancellation", False),
         postponement=payload.get("postponement", False),
     )
+    return detection, violations

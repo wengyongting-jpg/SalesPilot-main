@@ -79,9 +79,9 @@ class TestOfflinePath(_Quiet):
     def test_the_probe_reports_offline_rather_than_failing(self):
         config.LLM_PROVIDER = "offline"
         result = probe()
-        self.assertEqual(result["provider"], "offline")
-        self.assertIsNone(result["reachable"])
-        self.assertIn("offline", result["detail"])
+        self.assertEqual(result.provider, "offline")
+        self.assertIsNone(result.reachable)
+        self.assertIn("offline", result.detail)
 
 
 class TestModelBackedPath(_Quiet):

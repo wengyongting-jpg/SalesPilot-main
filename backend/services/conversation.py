@@ -31,7 +31,7 @@ from ..agent.model_factory import build as build_model
 from ..agent.reply import Composer, build_composer
 from ..domain.case import HumanCase
 from ..domain.detection import Detection, RetrievalResult
-from ..domain.enums import Generation, Intent, OpportunityState, Product, Signal
+from ..domain.enums import Generation, Intent, OpportunityState, Product, ReplyMode, Signal
 from ..domain.message import Message, MessageAuthor, MessageRole
 from ..domain.opportunity import (
     Opportunity,
@@ -59,6 +59,14 @@ from . import cases
 # §12.1: model-authored free text is a prompt-injection path; keep it short.
 _MAX_CONCERN_CHARS = 200
 
+# The reply and the cards must agree: returning a premium fact alongside "a
+# representative will be in touch" would put a price card under a handover
+# message, or offer plans to a conversation the qualification gate has held.
+# `retrieval.facts` still runs in every mode (so telemetry sees what would
+# have been available), but only these three modes are permitted to *show*
+# them to the customer.
+_NO_FACTS_REPLY_MODES = frozenset({ReplyMode.HANDOVER, ReplyMode.HOLD, ReplyMode.WITHDRAWN})
+
 
 class QuestionAnswerTooLong(ValueError):
     """A free-form answer exceeded the approved customer question limit."""
@@ -80,10 +88,32 @@ class TurnResult:
     quick_replies: list[QuickReply] = field(default_factory=list)
     run: Optional[AgentRun] = None
     extraction_source: Optional[str] = None
+    # What the assistant was permitted to say this turn — not `retrieval.facts`
+    # directly, which still runs in every mode. Empty whenever the reply mode
+    # is one the customer-safe reply must not attach a product card to.
+    customer_facts: list[str] = field(default_factory=list)
+    # Set once, on the turn that actually ran the pipeline, and copied onto a
+    # replay's `TurnResult` verbatim: idempotency means a replay returns the
+    # exact original response, not a best-effort reconstruction from whatever
+    # the narrow receipt happened to keep. `replayed` is deliberately not a
+    # key inside this dict — it is a fact about *this call*, asserted
+    # separately on `TurnResult.replayed`, not about the response content
+    # two calls must agree on.
+    _snapshot: Optional[dict[str, Any]] = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for testing and API responses."""
-        from ..services.serialisation import message_to_dict, opportunity_to_dict
+        if self._snapshot is not None:
+            return self._snapshot
+
+        from ..services.serialisation import (
+            action_to_dict,
+            case_to_dict,
+            detection_to_dict,
+            message_to_dict,
+            opportunity_to_dict,
+            retrieval_to_dict,
+        )
 
         return {
             "opportunity_id": self.opportunity.id,
@@ -91,13 +121,17 @@ class TurnResult:
             "reply": self.reply.text,
             "message": message_to_dict(self.reply),
             "generation": self.reply.generation.value if self.reply.generation else None,
-            "replayed": self.replayed,
+            "detection": detection_to_dict(self.detection),
+            "retrieval": retrieval_to_dict(self.retrieval),
+            "next_best_action": action_to_dict(self.next_best_action),
+            "case": case_to_dict(self.case),
             "agent_run": self.run.to_dict(include_content=False) if self.run else None,
             "quick_replies": [{"id": c.id, "label": c.label} for c in self.quick_replies],
-            "customer_facts": list(self.retrieval.facts) if self.retrieval else [],
+            "customer_facts": list(self.customer_facts),
             "state_change": self.state_change,
             "score_total": self.score.total if self.score else None,
             "client_message_id": self.receipt.get("client_message_id"),
+            "extraction_source": self.extraction_source,
         }
 
 
@@ -106,16 +140,24 @@ class ConversationService:
         self,
         repo: Repository,
         *,
-        extractor: Extractor,
-        composer: Composer,
+        extractor: Optional[Extractor] = None,
+        composer: Optional[Composer] = None,
+        model: Any = None,
+        trace: Optional[bool] = None,
         retriever: Optional[KnowledgeRetriever] = None,
         now: Callable[[], datetime] = datetime.now,
     ) -> None:
+        # `model=` is a convenience for callers (e.g. `backend.evals`) that want
+        # both peers built from one provider without wiring `build_extractor`/
+        # `build_composer` themselves. An explicit `extractor=`/`composer=`
+        # always wins, so `build_service`'s own wiring is unaffected.
         self.repo = repo
-        self.extractor = extractor
-        self.composer = composer
+        self.extractor = extractor or build_extractor(model)
+        self.composer = composer or build_composer(model)
         self.retriever = retriever or KnowledgeRetriever()
         self._now = now
+        if trace is not None:
+            config.CONSOLE_TRACE = trace
 
     # ---- The use-case -----------------------------------------------------------
 
@@ -157,14 +199,21 @@ class ConversationService:
                 from ..domain.detection import RetrievalResult
                 retrieval = RetrievalResult(facts=stored.get("facts", []))
 
-                return TurnResult(
+                replay = TurnResult(
                     opportunity=opp,
                     reply=reply_msg,
                     receipt=stored,
                     quick_replies=chips_from_receipt,
                     retrieval=retrieval,
-                    replayed=True
+                    replayed=True,
                 )
+                # A receipt saved before this snapshot mechanism existed has
+                # no `_snapshot`; the fields reconstructed above are the
+                # fallback for that case.
+                snapshot = stored.get("_snapshot")
+                if snapshot is not None:
+                    replay._snapshot = snapshot
+                return replay
 
         opp = self._get_or_create(scope, customer_name)
         now = self._now()
@@ -296,6 +345,7 @@ class ConversationService:
             step.note(nba.action)
 
         chips = quick_replies.suggest(opp, det)
+        customer_facts = [] if nba.reply_mode in _NO_FACTS_REPLY_MODES else list(retrieval.facts)
 
         # 3. Composing segment: only a customer-safe projection crosses over.
         withdrawal = Signal.WITHDRAWAL in det.signals
@@ -382,17 +432,15 @@ class ConversationService:
             "reply": reply_message.text,
             "generation": reply_message.generation.value,
             "product": opp.product.value,
-            "facts": list(retrieval.facts),
+            "facts": customer_facts,
             "quick_replies": [{"id": c.id, "label": c.label} for c in chips],
             "human_takeover": opp.human_takeover,
             "state_change": state_change,
             "score_total": card.total,
             "run_id": run.run_id,
         }
-        if key:
-            self.repo.save_receipt(opp.id, key, receipt)
 
-        return TurnResult(
+        result = TurnResult(
             opportunity=opp,
             reply=reply_message,
             receipt=receipt,
@@ -405,7 +453,16 @@ class ConversationService:
             quick_replies=chips,
             run=run,
             extraction_source=outcome.source,
+            customer_facts=customer_facts,
         )
+        if key:
+            # Freeze the exact response now, before it is returned, so a
+            # replay of this same key later returns this precise snapshot
+            # rather than a reconstruction from the narrower receipt fields.
+            result._snapshot = result.to_dict()
+            receipt["_snapshot"] = result._snapshot
+            self.repo.save_receipt(opp.id, key, receipt)
+        return result
 
     def reset(self, conversation_id: str) -> bool:
         """Discard a conversation. Returns whether there was one.
@@ -433,8 +490,8 @@ class ConversationService:
     def _handoff_chips() -> list[QuickReply]:
         """Quick reply buttons for handoff confirmation."""
         return [
-            QuickReply(id="handoff-confirm", label="Confirm"),
-            QuickReply(id="handoff-cancel", label="Cancel"),
+            QuickReply(id="handoff_confirm", label="Confirm"),
+            QuickReply(id="handoff_cancel", label="Cancel"),
         ]
 
     @staticmethod

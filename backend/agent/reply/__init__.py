@@ -10,10 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
+from ...domain.decision import NextBestAction
 from ...domain.detection import RetrievalResult
 from ...domain.enums import ReplyMode
 from ...domain.message import Generation, Message
-from ...kernel.next_best_action import NextBestAction
 from ...observability import RunRecorder
 from ...observability.violations import ModelViolation
 

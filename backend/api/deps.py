@@ -34,14 +34,9 @@ class Services:
         *,
         conversation: Optional[ConversationService] = None,
     ) -> "Services":
-        from ..agent.extraction.rules import RuleExtractor
-        from ..agent.reply.template import TemplateComposer
+        from ..services.conversation import build_service
 
-        conversation = conversation or ConversationService(
-            repository,
-            extractor=RuleExtractor(),
-            composer=TemplateComposer(),
-        )
+        conversation = conversation or build_service(repository)
         return cls(
             repo=repository,
             conversation=conversation,
