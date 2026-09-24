@@ -29,6 +29,17 @@ PRICES_USD_PER_MILLION: dict[str, tuple[Decimal, Decimal]] = {
 _MILLION = Decimal(1_000_000)
 
 
+def is_known(model: str) -> bool:
+    """Whether `model` (after normalising a dated snapshot) has a price entry.
+
+    `agent.model_factory` checks this before deciding whether a call can be
+    wrapped for enforced cost accounting — an unpriced model must not be
+    silently treated as free, so callers that need the cost budget enforced
+    (`backend.evals`) stop rather than proceed on faith.
+    """
+    return _normalise(model) in PRICES_USD_PER_MILLION
+
+
 def cost_for(model: str, prompt_tokens: int, completion_tokens: int) -> Optional[Cost]:
     if prompt_tokens <= 0 and completion_tokens <= 0:
         return None

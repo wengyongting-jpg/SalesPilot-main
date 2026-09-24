@@ -307,14 +307,20 @@ class ConversationService:
 
         with recorder.step("hitl", "rule") as step:
             proposal = outcome.handoff
-            proposal_accepted = proposal is not None and hitl.accepts_proposal(opp, det, proposal)
+            # `evaluate` decides proposal acceptance internally (qualification,
+            # takeover) and returns it encoded in `reason` itself — there is no
+            # separate acceptance function to call. `proposal_accepted` here is
+            # only for the diagnostic note below, derived from that same
+            # returned reason rather than duplicating the acceptance check.
             reason = hitl.evaluate(
                 opp,
                 det,
                 retrieval,
                 confidence_floor=config.RETRIEVAL_CONFIDENCE_ESCALATE,
+                customer_text=text,
                 proposal=proposal,
             )
+            proposal_accepted = bool(reason) and reason.startswith(hitl.REASON_ASSISTANT_PROPOSED)
             case: Optional[HumanCase] = None
             if reason:
                 # Instead of creating case directly, set pending for confirmation
