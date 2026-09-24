@@ -176,7 +176,8 @@ def score(
         behaviour_total=behaviour_total,
         total=round((fit_total + behaviour_total) / 2),
         priority=priority_rules.derive(
-            fit_total, behaviour_total, opp.qualification, withdrawn=withdrawn
+            fit_total, behaviour_total, opp.qualification,
+            withdrawn=withdrawn, state=opp.state,
         ),
     )
 

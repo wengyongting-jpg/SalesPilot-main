@@ -24,8 +24,13 @@ _PRODUCT_PHRASES: list[tuple[Product, tuple[str, ...]]] = [
         "family of", "for my family", "family needs", "family insurance",
     )),
     (Product.PLUS, (
-        "caresure plus", "plus plan", "the plus plan", "private hospital",
-        "private healthcare", "enhanced plan", "premium plan", "higher coverage",
+        # Deliberately no bare "private hospital"/"private healthcare": they
+        # are coverage-tier descriptors a customer can use while stating a
+        # family or corporate need ("private hospital cover for me and my
+        # two children" is a family need, not a Plus-specific request), so
+        # they must not outrank an explicit family/corporate reference.
+        "caresure plus", "plus plan", "the plus plan",
+        "enhanced plan", "premium plan", "higher coverage",
     )),
     (Product.ESSENTIAL, (
         "essential", "basic plan", "cheapest", "entry plan", "affordable plan",

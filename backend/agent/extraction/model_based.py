@@ -46,16 +46,20 @@ from ..tools import (
 )
 from . import rules
 
-# Intents that gate whether a human must be involved at all (`kernel.hitl`'s
-# "outside the assistant's authority" triggers). A model's own semantic read
-# has no keyword safety net the way `solicitation` always does below, so a
-# near-verbatim "I want to cancel my policy" or "speak to a human" could
-# silently fail to escalate purely because this run's model classified it
-# differently. A missed escalation is the costly failure direction here, so
-# the deterministic read wins whenever it fires — the same "the deterministic
-# marker settles it" idea `kernel/qualification.py` already applies to
-# solicitation, extended to these three intents.
-_ESCALATION_CRITICAL_INTENTS = frozenset({Intent.HUMAN_REQUEST, Intent.COMPLAINT, Intent.UNDERWRITING})
+# Intents where the rule-based phrase match is reliable enough that it
+# should win over the model's own read when the two disagree: the three
+# escalation-gating intents (`kernel.hitl`'s "outside the assistant's
+# authority" triggers, where a missed escalation is the costly failure
+# direction — a near-verbatim "I want to cancel my policy" or "speak to a
+# human" must not silently fail to escalate purely because this run's model
+# classified it differently), plus comparison, whose trigger phrases
+# ("compare", "versus", "difference between", ...) are unambiguous enough
+# that a live model has been observed missing one a keyword match still
+# caught. The same "the deterministic marker settles it" idea
+# `kernel/qualification.py` already applies to solicitation below.
+_ESCALATION_CRITICAL_INTENTS = frozenset(
+    {Intent.HUMAN_REQUEST, Intent.COMPLAINT, Intent.UNDERWRITING, Intent.COMPARISON}
+)
 
 
 def extract(
@@ -131,7 +135,13 @@ def extract(
         restricted=output.restricted,
         cancellation=output.cancellation,
         postponement=output.postponement,
-        genuine_enquiry=output.genuine_enquiry,
+        # The rule-based solicitation marker is deliberately conservative
+        # (it only fires when the message shows no interest in being
+        # insured), so when it fires it is strong, corroborated evidence
+        # against a genuine enquiry — stronger than trusting the model's own
+        # field alone, which has been observed staying `True` against a live
+        # gateway for a message the rule-based marker correctly caught.
+        genuine_enquiry=output.genuine_enquiry and not solicitation,
         solicitation=solicitation,
     )
     return ExtractionOutcome(

@@ -23,7 +23,9 @@ MEDIUM at most. That is the spam case, and on the frozen build it reached HIGH.
 """
 from __future__ import annotations
 
-from ..domain.enums import Priority, Qualification
+from typing import Optional
+
+from ..domain.enums import OpportunityState, Priority, Qualification
 
 FIT_A_MIN = 70
 FIT_B_MIN = 40
@@ -65,6 +67,7 @@ def derive(
     qualification: Qualification = Qualification.QUALIFIED,
     *,
     withdrawn: bool = False,
+    state: Optional[OpportunityState] = None,
 ) -> Priority:
     """Band the two axes into a sales priority.
 
@@ -73,9 +76,17 @@ def derive(
     explicitly withdrawn from is LOW for the same reason — the opportunity may still
     be worth something later, which is what the Dormant/Lost state and re-engagement
     are for, but it is not competing for a representative's attention now.
+
+    A Dormant/Lost opportunity is capped at MEDIUM rather than forced to LOW: it may
+    well be worth reviving, so it should not be buried under every live LOW lead, but
+    it is not the next call to make either, which is what an uncapped HIGH would
+    imply for a fit/behaviour combination that predates its own dormancy.
     """
     if qualification is not Qualification.QUALIFIED:
         return Priority.LOW
     if withdrawn:
         return Priority.LOW
-    return _MATRIX[(fit_band(fit), behaviour_band(behaviour))]
+    banded = _MATRIX[(fit_band(fit), behaviour_band(behaviour))]
+    if state is OpportunityState.DORMANT_LOST and banded is Priority.HIGH:
+        return Priority.MEDIUM
+    return banded
