@@ -19,6 +19,7 @@ not the counters, not the histories (`backend-contract.md` item 1).
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -51,6 +52,7 @@ from ..kernel import (
 )
 from ..kernel.next_best_action import NextBestAction
 from ..kernel.quick_replies import QuickReply
+from ..knowledge import questions
 from ..knowledge.retriever import PRODUCT_SURVEY_INTENTS, KnowledgeRetriever
 from ..observability import AgentRun, RunRecorder, print_run
 from ..observability.logging import log_run
@@ -68,6 +70,19 @@ _MAX_CONCERN_CHARS = 200
 # them to the customer.
 _NO_FACTS_REPLY_MODES = frozenset(
     {ReplyMode.HANDOVER, ReplyMode.HOLD, ReplyMode.WITHDRAWN, ReplyMode.GREETING}
+)
+
+# Matches `questions.normalise_answer`'s own truncation, so a customer is told
+# their answer is too long rather than having it silently cut off mid-word.
+_MAX_QUESTION_ANSWER_CHARS = 200
+
+# A corporate customer who already states a headcount ("we have 200
+# employees") has answered before being asked; this is checked against the
+# customer's own text, not by product/intent alone, the same way the other
+# text-level checks in this pipeline are (the catalogue-request check, the
+# corporate-quote regex).
+_EMPLOYEE_COUNT_MENTION = re.compile(
+    r"\b\d{1,4}\s*(?:employees?|staff|headcount|people|workers)\b", re.IGNORECASE
 )
 
 
@@ -131,6 +146,10 @@ class TurnResult:
             "agent_run": self.run.to_dict(include_content=False) if self.run else None,
             "quick_replies": [{"id": c.id, "label": c.label} for c in self.quick_replies],
             "customer_facts": list(self.customer_facts),
+            "customer_question": (
+                questions.payload(self.opportunity.pending_question_field)
+                if self.opportunity.pending_question_field else None
+            ),
             "state_change": self.state_change,
             "score_total": self.score.total if self.score else None,
             "client_message_id": self.receipt.get("client_message_id"),
@@ -239,6 +258,28 @@ class ConversationService:
             with recorder.step("handoff_superseded", "rule") as step:
                 step.note(f"Customer response '{text[:50]}' supersedes pending handoff; evaluating as new request")
             opp.pending_handoff_reason = None
+
+        # Check for a pending clarifying-question answer. Captured, then still
+        # falls through into normal extraction below with the same text: an
+        # answer like "we have 200 employees" is also worth extracting for its
+        # own signals, not only as this question's answer.
+        if opp.pending_question_field:
+            field = opp.pending_question_field
+            if len(text.strip()) > _MAX_QUESTION_ANSWER_CHARS:
+                raise QuestionAnswerTooLong(
+                    f"Answer to the pending question must be "
+                    f"{_MAX_QUESTION_ANSWER_CHARS} characters or fewer."
+                )
+            with recorder.step("question_answered", "rule") as step:
+                answer = questions.normalise_answer(field, text)
+                if answer is not None:
+                    opp.collected_answers[field] = answer
+                    opp.pending_question_field = None
+                    step.note(f"{field} = {answer!r}")
+                else:
+                    # Empty text, or "Something else" was chosen: still
+                    # waiting for the customer's actual free-text answer.
+                    step.note(f"{field} still pending (no answer captured)")
 
         context = opp.messages[:-1] or None
         old_state = opp.state
@@ -352,6 +393,10 @@ class ConversationService:
             proposal_accepted = bool(reason) and reason.startswith(hitl.REASON_ASSISTANT_PROPOSED)
             case: Optional[HumanCase] = None
             if reason:
+                # A human is taking this over, or about to be asked to
+                # (handoff confirmation): a clarifying-question flow that was
+                # mid-way through no longer applies.
+                opp.pending_question_field = None
                 # Instead of creating case directly, set pending for confirmation
                 existing_case = self.repo.active_case_for(opp.id)
                 if existing_case is not None:
@@ -377,6 +422,33 @@ class ConversationService:
         with recorder.step("next_best_action", "rule") as step:
             nba = next_best_action.recommend(opp, det, escalated=bool(reason))
             step.note(nba.action)
+
+        with recorder.step("clarifying_question", "rule") as step:
+            if opp.pending_handoff_reason or nba.reply_mode in _NO_FACTS_REPLY_MODES:
+                step.note("skipped: handoff pending or reply mode excludes selling")
+            elif opp.product is Product.CORPORATE and "employee_count" not in opp.collected_answers:
+                # Deterministic, not left to the model's own judgement: a
+                # corporate customer who already states a headcount ("we have
+                # 200 employees") has answered before being asked.
+                mentioned = _EMPLOYEE_COUNT_MENTION.search(text)
+                if mentioned:
+                    opp.collected_answers["employee_count"] = mentioned.group(0).strip()
+                    opp.pending_question_field = None
+                    step.note(f"employee_count captured from message: {mentioned.group(0)!r}")
+                elif not opp.pending_question_field:
+                    opp.pending_question_field = "employee_count"
+                    step.note("proposed employee_count (deterministic: corporate product)")
+                else:
+                    step.note("employee_count already pending")
+            elif (
+                outcome.question_field
+                and outcome.question_field not in opp.collected_answers
+                and not opp.pending_question_field
+            ):
+                opp.pending_question_field = outcome.question_field
+                step.note(f"proposed {outcome.question_field} (model-proposed)")
+            else:
+                step.note("no question proposed")
 
         chips = quick_replies.suggest(opp, det)
         customer_facts = [] if nba.reply_mode in _NO_FACTS_REPLY_MODES else list(retrieval.facts)
@@ -438,9 +510,13 @@ class ConversationService:
                 if reply_outcome.degraded and not reply_outcome.by_design:
                     step.degrade(reply_outcome.degradation_reason or "degraded")
 
+            reply_text = reply_outcome.text
+            if opp.pending_question_field:
+                reply_text = f"{reply_text}\n\n{questions.text_prompt(opp.pending_question_field)}"
+
             reply_message = Message(
                 role=MessageRole.BUSINESS,
-                text=reply_outcome.text,
+                text=reply_text,
                 author=MessageAuthor.AI,
                 generation=reply_outcome.generation,
             )

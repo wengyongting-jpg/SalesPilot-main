@@ -15,6 +15,10 @@ CATALOG = {
         "prompt": "When would you prefer a follow-up?",
         "options": ["Morning", "Afternoon", "Evening", "Something else"],
     },
+    "employee_count": {
+        "prompt": "About how many employees would need cover?",
+        "options": ["1-10", "11-50", "51-200", "201-500", "More than 500"],
+    },
 }
 
 

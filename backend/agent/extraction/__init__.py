@@ -39,6 +39,10 @@ class ExtractionOutcome:
     handoff: Optional[HandoffProposal] = None
     trace: list[Any] = field(default_factory=list)
     memory: Optional[dict[str, Any]] = None
+    # The model's proposal, via the `propose_customer_question` tool, that one
+    # approved catalogue question is worth asking; `services` decides whether
+    # to actually ask it.
+    question_field: Optional[str] = None
 
 
 @runtime_checkable

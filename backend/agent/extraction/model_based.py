@@ -51,6 +51,7 @@ from ..tools import (
     request_human_handoff,
     search_conversation_history,
 )
+from ..tools.questions import propose_customer_question
 from . import rules
 
 # Intents where the rule-based phrase match is reliable enough that it
@@ -119,6 +120,9 @@ def extract(
             name="search_conversation_history",
         )
     agent.tool_plain(_bind(request_human_handoff, tool_context), name="request_human_handoff")
+    agent.tool_plain(
+        _bind(propose_customer_question, tool_context), name="propose_customer_question"
+    )
 
     # The deterministic read, computed once and reused below: `solicitation`
     # is always taken from here regardless of which branch fires (see
@@ -222,6 +226,7 @@ def extract(
         handoff=handoff,
         trace=list(messages),
         memory=memory_state,
+        question_field=tool_context.question_field,
     )
 
 
