@@ -77,6 +77,24 @@ class InMemoryRepository(Repository):
 
     def delete_opportunity(self, opportunity_id: str) -> bool:
         self._memory.pop(opportunity_id, None)
+        # Cases and idempotency receipts are keyed by opportunity id, not by a
+        # foreign key SQLite would cascade for us, so a reset that leaves them
+        # behind orphans them: a stale case still shows "Taken Over" for a
+        # conversation that no longer exists, and a stale receipt makes the
+        # *next* customer message reusing the same client_message_id (a fresh
+        # conversation started with the same customer id) try to replay a
+        # reply from an opportunity that is no longer there.
+        stale_case_ids = [
+            case_id for case_id, case in self._cases.items()
+            if case.opportunity_id == opportunity_id
+        ]
+        for case_id in stale_case_ids:
+            del self._cases[case_id]
+        stale_receipt_keys = [
+            key for key in self._receipts if key[0] == opportunity_id
+        ]
+        for key in stale_receipt_keys:
+            del self._receipts[key]
         return self._opportunities.pop(opportunity_id, None) is not None
 
     # ---- Cases ----------------------------------------------------------------

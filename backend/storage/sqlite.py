@@ -180,9 +180,23 @@ class SqliteRepository(Repository):
             )
 
     def delete_opportunity(self, opportunity_id: str) -> bool:
+        # `cases` and `message_receipts` carry opportunity_id but no
+        # `ON DELETE CASCADE` (unlike messages/conversation_memory/score_history/
+        # state_history), so without this they outlive the opportunity: a
+        # stale case still shows "Taken Over" for a conversation that no
+        # longer exists, and a stale receipt makes the *next* customer
+        # message reusing the same client_message_id (a fresh conversation
+        # started with the same customer id) try to replay a reply from an
+        # opportunity that is no longer there.
         with self._lock:
-            cursor = self._conn.execute("DELETE FROM opportunities WHERE id = ?", (opportunity_id,))
-            self._conn.commit()
+            with self._conn:
+                self._conn.execute("DELETE FROM cases WHERE opportunity_id = ?", (opportunity_id,))
+                self._conn.execute(
+                    "DELETE FROM message_receipts WHERE opportunity_id = ?", (opportunity_id,)
+                )
+                cursor = self._conn.execute(
+                    "DELETE FROM opportunities WHERE id = ?", (opportunity_id,)
+                )
         return cursor.rowcount > 0
 
     # ---- Cases ----------------------------------------------------------------
