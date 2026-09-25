@@ -41,7 +41,13 @@ INTENT_FIELDS: dict[Intent, tuple[str, ...]] = {
 # (APPLICATION) is already well served by the general overview, and dropping
 # the price to show positioning alone there would be a regression, not an
 # improvement.
-_OVERVIEW_INTENTS = frozenset({
+#
+# Exported (not module-private) because `services.conversation` also reads it:
+# an advice-style question in this set that names no product in the current
+# message ("my father is 90, any advice?") should survey every plan's own
+# field rather than silently narrow to whatever product extraction inferred
+# from unrelated wording - there is nothing named to answer about specifically.
+PRODUCT_SURVEY_INTENTS = frozenset({
     Intent.COVERAGE, Intent.ELIGIBILITY, Intent.CLAIMS,
     Intent.WAITING_PERIOD, Intent.PAYMENT,
 })
@@ -258,7 +264,7 @@ class KnowledgeRetriever:
         )
         field = (
             INTENT_FIELDS[intent][0]
-            if not is_catalog_request and intent in _OVERVIEW_INTENTS
+            if not is_catalog_request and intent in PRODUCT_SURVEY_INTENTS
             else None
         )
         if field:

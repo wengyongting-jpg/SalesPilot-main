@@ -27,6 +27,7 @@ from typing import Any, Callable, Optional
 from .. import config
 from ..agent import policy, runtime
 from ..agent.extraction import Extractor, build_extractor
+from ..agent.extraction.rules import product as product_rules
 from ..agent.model_factory import build as build_model
 from ..agent.reply import Composer, build_composer
 from ..domain.case import HumanCase
@@ -50,7 +51,7 @@ from ..kernel import (
 )
 from ..kernel.next_best_action import NextBestAction
 from ..kernel.quick_replies import QuickReply
-from ..knowledge.retriever import KnowledgeRetriever
+from ..knowledge.retriever import PRODUCT_SURVEY_INTENTS, KnowledgeRetriever
 from ..observability import AgentRun, RunRecorder, print_run
 from ..observability.logging import log_run
 from ..storage.base import Repository
@@ -315,7 +316,22 @@ class ConversationService:
             if len(mentioned) >= 2:
                 retrieval = self.retriever.retrieve_comparison(mentioned[0], mentioned[1])
             else:
-                retrieval = self.retriever.retrieve(text, opp.product, det.intent)
+                product_for_retrieval = opp.product
+                # An advice-style question (eligibility, coverage, ...) where
+                # no product has ever actually been named - by the customer,
+                # this turn or earlier - should survey every plan's own field
+                # rather than answer about whichever product extraction
+                # inferred from unrelated wording ("my father is 90 years
+                # old" -> Family). `product_rules.detect` is the same
+                # literal-naming check retrieval already trusts elsewhere,
+                # and it is context-aware, so a plan named earlier in the
+                # conversation still correctly narrows the answer.
+                if (
+                    det.intent in PRODUCT_SURVEY_INTENTS
+                    and product_rules.detect(text, context=context) is Product.UNKNOWN
+                ):
+                    product_for_retrieval = Product.UNKNOWN
+                retrieval = self.retriever.retrieve(text, product_for_retrieval, det.intent)
             step.note(f"confidence={retrieval.confidence:.2f} facts={len(retrieval.facts)}")
 
         with recorder.step("hitl", "rule") as step:
