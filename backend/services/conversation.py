@@ -198,6 +198,7 @@ class ConversationService:
                 det,
                 retrieval,
                 confidence_floor=config.RETRIEVAL_CONFIDENCE_ESCALATE,
+                customer_text=text,
                 proposal=proposal,
             )
             case: Optional[HumanCase] = None

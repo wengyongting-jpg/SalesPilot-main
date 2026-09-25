@@ -23,6 +23,7 @@ rather than opening a second one, so a queue never shows the same customer twice
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from ..domain.detection import Detection, HandoffProposal, RetrievalResult
@@ -52,6 +53,7 @@ _FACTUAL_INTENTS = {
 
 REASON_HUMAN_REQUEST = "Customer explicitly asked to speak to a person"
 REASON_COMPLAINT = "Complaint handling is outside the assistant's authority"
+REASON_CANCELLATION = "Policy cancellation requires human handling"
 REASON_NEGOTIATION = (
     "Commercial negotiation or discount request requires human handling"
 )
@@ -66,6 +68,19 @@ REASON_COMPETITIVE = (
 )
 REASON_ASSISTANT_PROPOSED = "Assistant proposed a handover"
 
+# A corporate quote request phrased without "sign up"/"apply" — "please prepare a
+# quotation for our corporate plan" — still needs a person: it never sets
+# `Signal.PURCHASE`, so the existing product/intent gate below never fires and it
+# was answered as an ordinary FAQ instead of escalated. Checked against the
+# customer's own text since it is deliberately independent of intent/signal
+# extraction, which is exactly the point — this phrasing is one a live model has
+# been observed classifying inconsistently.
+_CORPORATE_QUOTE_REQUEST = re.compile(
+    r"\b(?:prepare|provide|send|issue|request|need|want|get|give|would like)\b"
+    r".{0,48}\b(?:quote|quotation)\b",
+    re.IGNORECASE,
+)
+
 
 def evaluate(
     opp,
@@ -73,6 +88,7 @@ def evaluate(
     retrieval: RetrievalResult,
     *,
     confidence_floor: float = ESCALATE_BELOW_CONFIDENCE,
+    customer_text: str = "",
     proposal: Optional[HandoffProposal] = None,
 ) -> Optional[str]:
     """Return the escalation reason, or None when the assistant may continue.
@@ -101,6 +117,9 @@ def evaluate(
     if det.intent is Intent.COMPLAINT:
         return REASON_COMPLAINT
 
+    if det.cancellation:
+        return REASON_CANCELLATION
+
     # A price *concern* is hesitation, not a negotiation (P0-1). Only an explicit
     # discount or price-match request lands here, and it says so plainly (P0-4).
     if Signal.NEGOTIATION in signals:
@@ -115,12 +134,15 @@ def evaluate(
     # (checked before CORPORATE_NEED), which previously let a ready-to-sign
     # corporate lead skip this gate entirely and get an automated FAQ answer
     # instead of the human handling a corporate quotation always requires.
-    if opp.product is Product.CORPORATE and det.intent in (
-        Intent.CORPORATE_NEED,
-        Intent.PRICE,
-        Intent.APPLICATION,
-    ) and Signal.PURCHASE in signals:
-        return REASON_CORPORATE_QUOTE
+    if opp.product is Product.CORPORATE:
+        if _CORPORATE_QUOTE_REQUEST.search(customer_text):
+            return REASON_CORPORATE_QUOTE
+        if det.intent in (
+            Intent.CORPORATE_NEED,
+            Intent.PRICE,
+            Intent.APPLICATION,
+        ) and Signal.PURCHASE in signals:
+            return REASON_CORPORATE_QUOTE
 
     # Weak retrieval, but only for a specific question about a known product. A
     # generic enquiry with no match is answered generally, not escalated.

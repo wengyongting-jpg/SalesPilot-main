@@ -29,7 +29,22 @@ def append_rep_reply(
         raise OpportunityNotFound(opportunity_id)
     if not opp.human_takeover:
         raise NotUnderTakeover(opportunity_id)
+
+    if client_message_id:
+        existing = _already_sent(opp, client_message_id)
+        if existing is not None:
+            # Same reasoning as customer-message idempotency: a retry after a
+            # timeout must not double-post to the customer.
+            return existing
+
     message = Message.from_human(text, rep_name=rep_name, client_message_id=client_message_id)
     opp.messages.append(message)
     repo.upsert_opportunity(opp)
     return message
+
+
+def _already_sent(opp, client_message_id: str) -> Optional[Message]:
+    for message in reversed(opp.messages):
+        if message.client_message_id == client_message_id:
+            return message
+    return None
