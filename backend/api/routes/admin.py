@@ -153,3 +153,9 @@ def release(
 def held(repo: Repository = Depends(get_repo)) -> dict:
     items = [summary_to_wire(o) for o in opportunities.held(repo)]
     return {"count": len(items), "items": items}
+
+
+@admin_only.get("/opportunities/{opportunity_id}/score-explain")
+def score_explain(opportunity_id: str, repo: Repository = Depends(get_repo)) -> dict:
+    opp = opportunities.require(repo, opportunity_id)
+    return opportunities.score_explanation(opp)

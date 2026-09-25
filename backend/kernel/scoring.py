@@ -51,9 +51,10 @@ stored data and recency behaviour is testable.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from ..domain.detection import Detection
-from ..domain.enums import Intent, Priority, Product, Qualification, Signal
+from ..domain.enums import Intent, MessageRole, Priority, Product, Qualification, Signal
 from ..domain.opportunity import Opportunity, ScoreCard
 from . import priority as priority_rules
 
@@ -288,3 +289,81 @@ def urgency_in(text: str) -> bool:
     """
     lowered = text.lower()
     return any(phrase in lowered for phrase in _URGENCY_PHRASES)
+
+
+def explain(opp: Opportunity, card: Optional[ScoreCard] = None) -> dict:
+    """Reconstruct why the stored score and priority are what they are.
+
+    For the admin audit surface, not the customer wire: a representative
+    reviewing a HIGH-priority lead should be able to see *why* rather than take
+    the number on faith. Built entirely from persisted state — `opp` and its
+    stored `ScoreCard` — never from a live turn's `Detection`, which is not
+    stored, so this reproduces the arithmetic behind an opportunity's current
+    score rather than a specific turn's.
+    """
+    card = card or opp.score or ScoreCard()
+    signals = [signal.value for signal in opp.signals]
+    latest_id = next(
+        (m.id for m in reversed(opp.messages) if m.role is MessageRole.CUSTOMER),
+        None,
+    )
+    latest_at = opp.last_customer_message_at
+    return {
+        "rule_version": "two_axis_v1",
+        "latest_customer_message_id": latest_id,
+        "inputs": {
+            "last_intent": opp.last_intent.value,
+            "best_intent": opp.best_intent.value,
+            "product": opp.product.value,
+            "active_signals": signals,
+            "qualification": opp.qualification.value,
+            "state": opp.state.value,
+            "customer_message_count": opp.customer_message_count,
+            "urgency_observed": opp.urgency_observed,
+            "last_customer_message_at": latest_at.isoformat() if latest_at else None,
+        },
+        "dimensions": {
+            "need_identified": {
+                "points": card.need_identified,
+                "rule": "0 if not sellable or generic; 20 for a need without a known plan; otherwise 40",
+            },
+            "product_potential": {
+                "points": card.product_potential,
+                "rule": "Essential 10, Family 20, Plus 30, Corporate 40; 0 if not sellable",
+            },
+            "expansion": {
+                "points": card.expansion,
+                "rule": "Corporate expansion 20; family expansion 13; family-need intent 7; otherwise 0",
+            },
+            "purchase_intent": {
+                "points": card.purchase_intent,
+                "rule": "Intent and active purchase/conversion/withdrawal signals; capped at 40",
+            },
+            "purchase_readiness": {
+                "points": card.purchase_readiness,
+                "rule": "Latest message wording plus intent and purchase/comparison signals; capped at 30",
+            },
+            "engagement_depth": {
+                "points": card.engagement_depth,
+                "rule": "Diminishing-return customer message count; capped at 24",
+            },
+            "engagement_urgency": {
+                "points": card.engagement_urgency,
+                "rule": "6 if urgency has been observed and not withdrawn; otherwise 0",
+            },
+        },
+        "calculation": {
+            "fit": f"{card.need_identified} + {card.product_potential} + {card.expansion} = {card.fit_total}",
+            "behaviour_raw": (
+                f"{card.purchase_intent} + {card.purchase_readiness} + "
+                f"{card.engagement_depth} + {card.engagement_urgency} = {card.behaviour_raw}"
+            ),
+            "recency": f"{card.behaviour_raw} x {card.engagement_recency}% = {card.behaviour_total} (rounded)",
+            "display_score": f"({card.fit_total} + {card.behaviour_total}) / 2 = {card.total} (rounded)",
+            "priority": (
+                f"fit band {priority_rules.fit_band(card.fit_total)} x "
+                f"behaviour band {priority_rules.behaviour_band(card.behaviour_total)}, "
+                f"qualification/withdrawn/state caps applied -> {card.priority.value}"
+            ),
+        },
+    }
