@@ -18,6 +18,7 @@ from fastapi import APIRouter, Request
 
 from ...services import CaseNotFound, OpportunityNotFound
 from ...services.cases import parse_status
+from ...services.opportunities import score_explanation
 from ...services.seeding import seed
 from ...services.serialisation import (
     case_to_dict,
@@ -139,6 +140,16 @@ def get_opportunity_cost(opportunity_id: str, request: Request) -> dict:
             "pricing_known": pricing_known,
         },
     }
+
+
+@router.get("/opportunities/{opportunity_id}/score-explain")
+def get_score_explain(opportunity_id: str, request: Request) -> dict:
+    """The audit trail behind the opportunity's current score and priority."""
+    repo = services_of(request).repo
+    opportunity = repo.get_opportunity(opportunity_id)
+    if opportunity is None:
+        raise OpportunityNotFound(opportunity_id)
+    return score_explanation(opportunity)
 
 
 @router.post("/opportunities/{opportunity_id}/rep-reply")
