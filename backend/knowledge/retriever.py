@@ -34,6 +34,31 @@ INTENT_FIELDS: dict[Intent, tuple[str, ...]] = {
     Intent.CORPORATE_NEED: ("positioning", "premium", "eligibility"),
 }
 
+# Which intents get a field-specific product overview rather than the general
+# name/positioning/price one. Deliberately a subset of INTENT_FIELDS's own
+# keys, not all of them: an intent whose preferred field is already
+# "positioning" (COMPARISON, FAMILY_NEED, CORPORATE_NEED) or "premium"
+# (APPLICATION) is already well served by the general overview, and dropping
+# the price to show positioning alone there would be a regression, not an
+# improvement.
+_OVERVIEW_INTENTS = frozenset({
+    Intent.COVERAGE, Intent.ELIGIBILITY, Intent.CLAIMS,
+    Intent.WAITING_PERIOD, Intent.PAYMENT,
+})
+
+# "What plans are there?" and "How does cover work?" both classify as
+# Intent.COVERAGE - "what plans" is one of that intent's own trigger phrases,
+# alongside "cover"/"coverage" - so intent alone cannot tell a menu request
+# ("what are my options") apart from a coverage-mechanism question ("what
+# does it cover"). Checked against the raw query, not the classified intent,
+# specifically for this: an explicit catalogue request always gets the
+# general name/positioning/price listing, whatever intent it happened to
+# match.
+_CATALOG_REQUEST_PHRASES = (
+    "what plans", "what products", "what options", "which plans", "which products",
+    "list the plans", "list of plans", "show me the plans", "your plans",
+)
+
 FIELD_LABELS = {
     "positioning": "Overview",
     "target_customer": "Target customer",
@@ -86,7 +111,7 @@ class KnowledgeRetriever:
         intent: Intent = Intent.GENERIC,
     ) -> RetrievalResult:
         if product is Product.UNKNOWN:
-            return self._product_overview()
+            return self._product_overview(query, intent)
 
         product_data = self.products[product.value]
         query_tokens = _tokenize(query)
@@ -215,12 +240,31 @@ class KnowledgeRetriever:
             return 0.7
         return 0.3
 
-    def _product_overview(self) -> RetrievalResult:
+    def _product_overview(self, query: str, intent: Intent = Intent.GENERIC) -> RetrievalResult:
         # No lead-in line here: the reply's own opener ("Here's what I can
         # confirm...", "Happy to help...") already introduces the list, so a
         # second, self-describing header rendered as its own bullet only
         # duplicated it. Each entry is a fact in its own right; this line
         # was not.
-        return RetrievalResult(
-            facts=self.list_products(), matches=[], confidence=0.9, product=Product.UNKNOWN
+        #
+        # "How does cover work?" and "What plans are there?" both name no
+        # product, so both used to retrieve the exact same name/price
+        # listing regardless of what was actually asked. When the intent has
+        # its own preferred field (coverage, eligibility, claims, ...) and
+        # this isn't an explicit catalogue request, show that field per plan
+        # instead - a real answer to the question asked.
+        is_catalog_request = any(
+            phrase in query.lower() for phrase in _CATALOG_REQUEST_PHRASES
         )
+        field = (
+            INTENT_FIELDS[intent][0]
+            if not is_catalog_request and intent in _OVERVIEW_INTENTS
+            else None
+        )
+        if field:
+            facts = [
+                f"{p['name']} ({p['id']}): {p[field]}" for p in self.kb["products"]
+            ]
+        else:
+            facts = self.list_products()
+        return RetrievalResult(facts=facts, matches=[], confidence=0.9, product=Product.UNKNOWN)
