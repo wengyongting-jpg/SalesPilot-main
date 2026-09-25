@@ -31,6 +31,13 @@ class ReplyRequest:
     # The observing segment's message history, so the composing segment continues
     # one conversation instead of starting a second one.
     history: Optional[list] = None
+    # False for a pre-curated enumeration (e.g. "what plans are there?" - one
+    # short line per product, already trimmed to what's worth showing) where
+    # every fact belongs in the answer. Model-based fact selection exists to
+    # pick a few relevant fields out of a larger pool for *one* product; run
+    # against an enumeration, it instead drops most of the products, which
+    # answers a different question than the one asked.
+    select_facts: bool = True
 
 
 @dataclass

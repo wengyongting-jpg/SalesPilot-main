@@ -89,7 +89,15 @@ class TestModelBackedPath(_Quiet):
         service = _service(
             # The default TestModel calls every registered tool, including the
             # handover proposal; restrict extraction to a read-only lookup.
-            extraction_model=TestModel(call_tools=["lookup_product_fact"]),
+            # `product` is pinned rather than left at the schema default
+            # (Product.UNKNOWN): an unresolved product retrieves the product
+            # overview, which is a short, pre-curated enumeration that both
+            # composers now answer without a fact-selection call at all (every
+            # fact belongs in that answer, so there is nothing to select) -
+            # correct behaviour, but not what this test is verifying.
+            extraction_model=TestModel(
+                call_tools=["lookup_product_fact"], custom_output_args={"product": "plus"}
+            ),
             reply_model=TestModel(),
         )
         results = self.run_conversation(service)

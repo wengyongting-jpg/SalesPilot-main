@@ -406,6 +406,12 @@ class ConversationService:
                 concern=opp.main_concern,
                 disclaimer=kb.disclaimer,
                 history=opp.messages[:-1],  # All messages except the current customer message
+                # `retrieval.product` is UNKNOWN only for the product-overview
+                # case (`KnowledgeRetriever._product_overview`) - a short,
+                # already-curated one-liner per plan, not a larger pool to pick
+                # 1-2 fields from. Selecting *among* products there answers a
+                # different question than "what plans are there".
+                select_facts=retrieval.product is not Product.UNKNOWN,
             )
 
             # 3. Composing segment: record as response_generation step

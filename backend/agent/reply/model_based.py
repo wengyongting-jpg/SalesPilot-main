@@ -46,7 +46,11 @@ class ModelComposer:
 
     def compose(self, request: ReplyRequest) -> ReplyOutcome:
         # No approved fact means no free-text generation or model speculation.
-        if not request.facts:
+        # A pre-curated enumeration needs no selection either: every fact
+        # belongs in the answer, so there's nothing for a model to pick
+        # between, and calling one to reach the same "keep everything" result
+        # is only cost and latency.
+        if not request.facts or not request.select_facts:
             return self.fallback.compose(request)
         prompt = policy.build_fact_selection_prompt(
             facts=request.facts, concern=request.concern

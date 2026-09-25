@@ -216,5 +216,11 @@ class KnowledgeRetriever:
         return 0.3
 
     def _product_overview(self) -> RetrievalResult:
-        facts = ["Here are the CareSure plans:"] + self.list_products()
-        return RetrievalResult(facts=facts, matches=[], confidence=0.9, product=Product.UNKNOWN)
+        # No lead-in line here: the reply's own opener ("Here's what I can
+        # confirm...", "Happy to help...") already introduces the list, so a
+        # second, self-describing header rendered as its own bullet only
+        # duplicated it. Each entry is a fact in its own right; this line
+        # was not.
+        return RetrievalResult(
+            facts=self.list_products(), matches=[], confidence=0.9, product=Product.UNKNOWN
+        )
