@@ -188,6 +188,10 @@ class ReplyMode(str, Enum):
     WITHDRAWN = "withdrawn"
     HOLD = "hold"
     MAINTAIN = "maintain"
+    # A bare greeting, nothing else stated yet. Distinct from NURTURE/ANSWER's
+    # "give basic information" framing: there is no question to answer and no
+    # need identified yet, so the reply is a short welcome, not the catalogue.
+    GREETING = "greeting"
 
 
 class Qualification(str, Enum):

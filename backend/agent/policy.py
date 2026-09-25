@@ -119,6 +119,11 @@ _GUIDANCE: dict[ReplyMode, str] = {
         "This is an existing customer. Be helpful and factual about their policy "
         "and do not pitch anything they have not asked about."
     ),
+    ReplyMode.GREETING: (
+        "The customer has only said hello. Greet them briefly and ask what they "
+        "need help with. Do not list plans, quote figures or ask a qualifying "
+        "question yet."
+    ),
 }
 
 

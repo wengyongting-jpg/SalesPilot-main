@@ -46,6 +46,12 @@ class Detection:
     # promoting something rather than asking about cover. Produced by the
     # rule-based peer, so it is available with no model configured.
     solicitation: bool = False
+    # A bare greeting with no other content ("hi", "good morning") and nothing
+    # else worth reporting. Always the rule-based peer's own judgement, the same
+    # way `solicitation` is: a fixed, narrow phrase list is exactly the right tool
+    # for "is this message *only* a greeting", and a model has no advantage over
+    # it here, so there is no reason to let a model's read override it.
+    greeting: bool = False
 
 
 @dataclass

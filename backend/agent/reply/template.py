@@ -72,6 +72,9 @@ _STANDALONE: dict[ReplyMode, str] = {
         "Thanks for your message{name}. A colleague will review it and come back to "
         "you if we can help."
     ),
+    ReplyMode.GREETING: (
+        "Hello{name}! I'm CareSure's assistant — what can I help you with today?"
+    ),
 }
 
 _AI_NOTE = "(You're chatting with CareSure's AI assistant.)"

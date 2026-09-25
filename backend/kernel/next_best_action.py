@@ -70,6 +70,20 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
             human_intervention_required=True,
         )
 
+    # A bare greeting with no other content is not a request for information: the
+    # customer has not asked anything or stated a need yet, so answering with the
+    # product catalogue (the ANSWER/NURTURE default for "no need identified")
+    # reads as an unprompted info-dump. Checked after the three gates above, so a
+    # real signal (withdrawal, a hold, an active escalation) still wins over a
+    # coincidental greeting — not that one is likely to carry both at once.
+    if det.greeting:
+        return NextBestAction(
+            action="Greet the customer and invite them to say what they need",
+            reason="The message is a greeting with no stated need yet",
+            priority=priority,
+            reply_mode=ReplyMode.GREETING,
+        )
+
     # ---- State rules -----------------------------------------------------
 
     if opp.state is OpportunityState.HIGH_INTENT:

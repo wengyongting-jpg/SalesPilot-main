@@ -209,6 +209,10 @@ def extract(
         # (backend.evals supplier_spam turn 3).
         genuine_enquiry=output.genuine_enquiry and not solicitation,
         solicitation=solicitation,
+        # Always the rule-based peer's own read, never asked of the model: see
+        # `Detection.greeting`'s docstring for why a fixed phrase list is the
+        # right tool for "is this message *only* a greeting".
+        greeting=rule_based.greeting,
     )
     handoff = tool_context.handoff if tool_context.handoff.requested else None
     return ExtractionOutcome(

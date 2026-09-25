@@ -65,7 +65,9 @@ _MAX_CONCERN_CHARS = 200
 # `retrieval.facts` still runs in every mode (so telemetry sees what would
 # have been available), but only these three modes are permitted to *show*
 # them to the customer.
-_NO_FACTS_REPLY_MODES = frozenset({ReplyMode.HANDOVER, ReplyMode.HOLD, ReplyMode.WITHDRAWN})
+_NO_FACTS_REPLY_MODES = frozenset(
+    {ReplyMode.HANDOVER, ReplyMode.HOLD, ReplyMode.WITHDRAWN, ReplyMode.GREETING}
+)
 
 
 class QuestionAnswerTooLong(ValueError):
@@ -392,13 +394,7 @@ class ConversationService:
             with recorder.step("response_generation", "template") as step:
                 step.note(f"handoff_confirmation_requested reason={handoff_reason}")
         else:
-            # Normal reply generation
-            # First contact, nothing specific asked yet: a greeting, not a
-            # request for the full catalogue. Scoped to the first message only,
-            # matching the frozen build's `_GENERIC_HELP` case — a later bare
-            # "hi" is an ordinary customer message and gets an ordinary answer.
-            greeting = det.intent is Intent.GENERIC and opp.customer_message_count <= 1
-
+            # Normal reply generation.
             # Build ReplyRequest from the kernel decision
             from ..agent.reply import ReplyRequest
             from ..knowledge import loader

@@ -155,6 +155,17 @@ SOLICITATION_PHRASES = (
 
 _URL = re.compile(r"(https?://|www\.|\b[a-z0-9-]+\.(?:com|net|org|io|shop|xyz)\b)")
 
+# A bare greeting, and *only* a greeting: matched against the whole stripped,
+# punctuation-trimmed message, not as a substring or with a wildcard tail, so
+# "hi, how much is the family plan" still gets a real answer rather than a
+# "hello, what can I help with" reply that ignores the question actually asked.
+_GREETING_PHRASES = frozenset({
+    "hi", "hii", "hiii", "hello", "helloo", "hey", "heyy", "hiya", "yo",
+    "howdy", "greetings", "gday",
+    "good morning", "good afternoon", "good evening",
+    "hi there", "hello there", "hey there",
+})
+
 # "my two children"/"my three kids": a quantifier between "my" and the family
 # word defeats the literal "my child"/"my children" phrases above.
 _FAMILY_COUNT = re.compile(r"\bmy\s+\w+\s+(child|children|kids?|daughters?|sons?)\b")
@@ -274,6 +285,18 @@ def explicit_application_preparation(text: str) -> bool:
         "application steps", "steps to apply", "documents do i need",
         "documents i need", "what documents", "what do you need from me to apply",
     ))
+
+
+def is_greeting(text: str) -> bool:
+    """Whether the message is a bare greeting and nothing else.
+
+    An exact match against the whole message (after stripping invisible
+    characters and surrounding punctuation), never a substring test: "hi, how
+    much is the family plan" must not short-circuit into a greeting reply that
+    ignores the actual question.
+    """
+    cleaned = _strip_invisible(text).lower().strip(" \t\n!.,?~")
+    return cleaned in _GREETING_PHRASES
 
 
 def is_postponement(text: str) -> bool:

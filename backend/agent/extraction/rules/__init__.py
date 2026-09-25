@@ -69,6 +69,7 @@ class RuleExtractor:
             # failing that, to the gate's two-strike rule.
             genuine_enquiry=not solicitation,
             solicitation=solicitation,
+            greeting=signal_rules.is_greeting(text),
         )
         return ExtractionOutcome(detection=detection, source="rules")
 

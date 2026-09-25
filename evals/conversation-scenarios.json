@@ -71,13 +71,13 @@
     {
       "id": "baseline-greeting",
       "category": "baseline",
-      "description": "First message, nothing specific asked yet, should greet and ask which plan interests them rather than dumping the full catalogue.",
+      "description": "A bare greeting should get a short hello and an invitation to say what they need, not the full plan catalogue.",
       "turns": [
         {
           "send": { "text": "hi" },
           "expect": {
             "human_takeover": false,
-            "reply_contains_any": ["Essential", "Family", "Plus", "Corporate"],
+            "reply_contains_any": ["hello", "hi there"],
             "quick_replies_count_between": [1, 3]
           }
         }
