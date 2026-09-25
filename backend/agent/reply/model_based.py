@@ -53,7 +53,7 @@ class ModelComposer:
         if not request.facts or not request.select_facts:
             return self.fallback.compose(request)
         prompt = policy.build_fact_selection_prompt(
-            facts=request.facts, concern=request.concern
+            facts=request.facts, customer_text=request.customer_text, concern=request.concern
         )
         began = time.perf_counter()
         try:
@@ -83,6 +83,7 @@ class ModelComposer:
             safe_request = ReplyRequest(
                 facts=selected, action=request.action,
                 customer_name=request.customer_name, concern=request.concern,
+                customer_text=request.customer_text,
                 disclaimer=request.disclaimer, history=request.history,
             )
             rendered = self.fallback.compose(safe_request)

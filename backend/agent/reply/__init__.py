@@ -27,6 +27,12 @@ class ReplyRequest:
     action: NextBestAction
     customer_name: str = ""
     concern: Optional[str] = None
+    # The customer's own latest message, verbatim. `concern` is a coarse
+    # category ("Price", "Competitor", ...) set only when a specific signal
+    # fired, and `history` (below) excludes the current turn - without this,
+    # fact selection had nothing telling it what was actually asked, and
+    # would have to select against the facts alone.
+    customer_text: str = ""
     disclaimer: str = ""
     # The observing segment's message history, so the composing segment continues
     # one conversation instead of starting a second one.

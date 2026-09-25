@@ -219,16 +219,26 @@ def fact_selection_system_prompt() -> str:
     )
 
 
-def build_fact_selection_prompt(*, facts: list[str], concern: Optional[str] = None) -> str:
+def build_fact_selection_prompt(
+    *, facts: list[str], customer_text: str = "", concern: Optional[str] = None
+) -> str:
     parts = []
-    cleaned = sanitise_concern(concern)
-    if cleaned:
-        parts.append(data_section("customer concern, in their words", cleaned))
+    # The actual question, not a coarse category: `concern` is set only when a
+    # specific signal fired (a price objection, a competitor mention, ...) and
+    # is absent for an ordinary question, which used to leave this prompt with
+    # no indication at all of what the customer asked - just the facts and an
+    # instruction to answer "the latest customer message", never shown here.
+    cleaned_text = sanitise_concern(customer_text)
+    if cleaned_text:
+        parts.append(data_section("customer's latest message", cleaned_text))
+    cleaned_concern = sanitise_concern(concern)
+    if cleaned_concern:
+        parts.append(data_section("customer concern, in their words", cleaned_concern))
     parts.append(data_section(
         "approved facts available for selection",
         "\n".join(f"{index}: {fact}" for index, fact in enumerate(facts)),
     ))
-    parts.append("Select the indices that directly answer the latest customer message.")
+    parts.append("Select the indices that directly answer the customer's latest message above.")
     return "\n\n".join(parts)
 
 

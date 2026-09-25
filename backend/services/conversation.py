@@ -404,6 +404,7 @@ class ConversationService:
                 facts=list(retrieval.facts),
                 customer_name=opp.customer_name,
                 concern=opp.main_concern,
+                customer_text=text,
                 disclaimer=kb.disclaimer,
                 history=opp.messages[:-1],  # All messages except the current customer message
                 # `retrieval.product` is UNKNOWN only for the product-overview
