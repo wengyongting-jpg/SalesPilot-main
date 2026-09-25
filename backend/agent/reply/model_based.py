@@ -1,110 +1,122 @@
 # -*- coding: utf-8 -*-
-"""Model-based reply composition: the pydantic-ai peer of `reply.template`.
+"""Model-selected facts, rendered as customer-safe deterministic wording.
 
-Receives only a customer-safe instruction (`policy.customer_safe_projection`)
-and approved knowledge facts — never a raw state, score, signal list, or
-`NextBestAction` object, none of which `agent` can even import. The assembled
-prompt is checked with `policy.assert_customer_safe` before it is sent and
-the model's own output is checked again after, so this is enforced at run
-time, not only in tests. A breach there is a program error, not a
-degradation: it propagates.
+Continues the observing segment's conversation rather than starting a new one, so the
+model can select relevant approved facts using the customer's latest request. See
+`docs/v0.0/backend/backend-plan.md` §3.
 
-When the model is unavailable the template peer takes the turn and the run
-record says so (`generation="template"`, step `degraded`) — the offline
-outcome `interface-v1.md` §5.7 describes, never a silent substitution.
+No tools are offered in this segment. The model returns indices, not prose. The
+existing template peer renders the selected facts, preventing unsupported claims.
 
-`customer_message` is the customer's own raw text for this turn, included
-verbatim in the prompt so the model can see exactly how the question was
-phrased. An earlier version continued the *extraction* agent's own
-conversation here instead (`ExtractionOutcome.trace`, via pydantic-ai's
-`message_history`) — but that agent's trace is full of tool-call/tool-result
-content blocks, and this agent registers no tools of its own, which at least
-one OpenAI-compatible gateway (Bedrock-backed) rejects outright: "toolConfig
-field must be defined when using toolUse and toolResult content blocks." The
-only information that history was actually carrying for this agent's purposes
-was the customer's own words, so that is now passed directly instead.
+On failure it delegates to the template peer and **says that it did**. That is the
+distinction from the frozen build, which caught every exception, silently fell back,
+and left no trace beyond one response field nobody watched.
 """
 from __future__ import annotations
 
-from contextlib import nullcontext
-from datetime import datetime, timezone
+import json
+import time
 from typing import Optional
 
 from pydantic_ai import Agent
-from pydantic_ai.models import Model
+from pydantic import BaseModel, Field
 
-from ... import config
-from ...domain.detection import RetrievalResult
 from ...domain.enums import Generation
-from ...domain.message import Message
-from ...observability import RunRecorder, StepHandle
-from .. import policy, telemetry
-from . import template
-
-STEP_NAME = "response_generation"
+from .. import policy
+from ..usage import from_result
+from . import ReplyOutcome, ReplyRequest
+from .template import TemplateComposer
 
 
-def compose(
-    instruction: str,
-    retrieval: RetrievalResult,
-    *,
-    model: Model,
-    recorder: Optional[RunRecorder] = None,
-    greeting: bool = False,
-    customer_message: Optional[str] = None,
-) -> Message:
-    developer_prompt = _build_user_prompt(instruction, retrieval)
-    # Checked before the customer's own words are appended: this is the
-    # generous, developer/KB-vocabulary check (`policy.assert_customer_safe`),
-    # and a customer is free to type any of those ordinary words themselves
-    # without that being a leak of anything.
-    policy.assert_customer_safe(developer_prompt)
-    prompt = developer_prompt
-    if customer_message:
-        prompt += f"\n\nThe customer's message: {customer_message}"
+class FactSelection(BaseModel):
+    fact_indices: list[int] = Field(default_factory=list)
 
-    agent = Agent(model, system_prompt=policy.REPLY_SYSTEM_PROMPT, retries=1)
 
-    step_cm = recorder.step(STEP_NAME, "llm") if recorder else nullcontext(StepHandle())
-    with step_cm as step:
+class ModelComposer:
+    def __init__(
+        self,
+        model,
+        *,
+        fallback: Optional[TemplateComposer] = None,
+        usage_limits=None,
+    ) -> None:
+        self.model = model
+        self.fallback = fallback or TemplateComposer()
+        self.usage_limits = usage_limits
+
+    def compose(self, request: ReplyRequest) -> ReplyOutcome:
+        # No approved fact means no free-text generation or model speculation.
+        if not request.facts:
+            return self.fallback.compose(request)
+        prompt = policy.build_fact_selection_prompt(
+            facts=request.facts, concern=request.concern
+        )
+        began = time.perf_counter()
         try:
-            result = agent.run_sync(prompt)
-        except telemetry.UNAVAILABLE_ERRORS as exc:
-            step.degrade(telemetry.describe_unavailable(exc))
-            return template.compose(retrieval=retrieval, greeting=greeting, recorder=recorder)
-        if recorder is not None:
-            telemetry.record_trace(
-                recorder,
-                result.new_messages(),
-                purpose=STEP_NAME,
-                finished_at=datetime.now(timezone.utc),
+            agent = Agent(
+                self.model,
+                output_type=FactSelection,
+                system_prompt=policy.fact_selection_system_prompt(),
             )
-        try:
-            policy.assert_reply_safe(result.output)
-        except ValueError as exc:
-            # A genuine leak must never reach the customer, but it also must
-            # not crash the turn — degrade to the safe template peer instead,
-            # the same outcome as an unavailable model.
-            step.degrade(str(exc))
-            return template.compose(retrieval=retrieval, greeting=greeting, recorder=recorder)
-        step.note(f"chars={len(result.output)}")
-
-    output = result.output
-    if retrieval.mentions_premium and config.DEMO_DISCLAIMER not in output:
-        # The prompt already asks the model to append this verbatim, but that
-        # is an instruction, not a guarantee: a compliance red line
-        # (`.kiro/steering/product.md` — never hidden or truncated) cannot
-        # depend on a model reliably reproducing exact text across every
-        # generation. Enforced here the same way the template peer always
-        # has, so the property holds regardless of which peer answered.
-        output = f"{output}\n\n{config.DEMO_DISCLAIMER}"
-
-    return Message.from_ai(output, generation=Generation.LLM)
-
-
-def _build_user_prompt(instruction: str, retrieval: RetrievalResult) -> str:
-    lines = [instruction, "", "Approved facts:"]
-    lines.extend(f"- {fact}" for fact in retrieval.facts[:4])
-    if retrieval.mentions_premium:
-        lines.append(f"Disclaimer to append verbatim if a premium is shown: {config.DEMO_DISCLAIMER}")
-    return "\n".join(lines)
+            # `request.history` is a list of domain `Message` objects, not
+            # pydantic-ai's own `ModelMessage` type — passing it as
+            # `message_history=` crashes with an `AttributeError` on the
+            # first field pydantic-ai tries to read off it, as soon as there
+            # is any prior turn at all. The fact-selection prompt is
+            # self-contained (the approved facts and the customer's own
+            # concern), so no history needs to travel with this call.
+            result = agent.run_sync(
+                prompt,
+                usage_limits=self.usage_limits,
+            )
+            indices = list(dict.fromkeys(
+                index for index in result.output.fact_indices
+                if 0 <= index < len(request.facts)
+            ))[:2]
+            # Empty or invalid selection means we cannot support an answer from the
+            # offered facts. The renderer says so rather than guessing relevance.
+            selected = [request.facts[index] for index in indices]
+            safe_request = ReplyRequest(
+                facts=selected, action=request.action,
+                customer_name=request.customer_name, concern=request.concern,
+                disclaimer=request.disclaimer, history=request.history,
+            )
+            rendered = self.fallback.compose(safe_request)
+            elapsed_ms = int(round((time.perf_counter() - began) * 1000))
+            usage = from_result(
+                result,
+                purpose="response_generation",
+                duration_ms=elapsed_ms,
+                input_text=prompt,
+                output_text=json.dumps(result.output.model_dump()),
+            )
+            return ReplyOutcome(
+                text=rendered.text,
+                # The wording is the deterministic renderer's, but a live model
+                # call chose which approved facts to use — the customer-facing
+                # `generation` field means "did a model participate this turn",
+                # not "did a model author every word", so this is `LLM`, not
+                # `TEMPLATE`. `interface-v1.md` §5.7 and every other composer in
+                # this codebase report it on that same basis.
+                generation=Generation.LLM,
+                history=list(result.all_messages()),
+                usage=usage,
+                degraded=usage is None,
+                degradation_reason=(
+                    None if usage is not None else
+                    "the model selected facts but its token usage could not be "
+                    "read, so this call is missing from the run's cost accounting"
+                ),
+            )
+        except Exception as error:  # provider, network, key, limit or empty output
+            degraded = self.fallback.compose(request)
+            return ReplyOutcome(
+                text=degraded.text,
+                generation=Generation.TEMPLATE,
+                degraded=True,
+                degradation_reason=(
+                    f"model reply failed ({type(error).__name__}: {error}); "
+                    "composed from a template instead"
+                ),
+                history=list(request.history or []),
+            )

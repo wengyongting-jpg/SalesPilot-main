@@ -1,28 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Intent classifier — what the customer is asking about.
+"""Intent classification by phrase matching, with context for short messages.
 
-Keyword matching with conversation-history context resolution: an ambiguous
-short message (e.g. "yes", "how much") is resolved against the most recent
-business message. Ported from `salespilot/detection/intent.py`, retargeted to
-`backend.domain.enums.Intent` (12 members, including `UNDERWRITING` — the
-frozen build's prompt never offered this value to the model, which is part of
-the drift `backend/README.md` describes; the rule-based peer always had it).
+Match order is priority order: the riskiest and most specific intents are checked
+first, so "I want to cancel my policy" is a complaint rather than a coverage question.
 
-Match order is priority: high-risk / strong intents come first.
+The `underwriting` intent is named for the business process it triggers, not for its
+surface wording. The frozen build's prompt called the same thing `medical_question`,
+which the domain then rejected — the drift that made this intent unreachable whenever
+a model was configured.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from ....domain.enums import Intent
-from ....domain.message import Message
 
-_INTENT_PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
+_PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
     (Intent.HUMAN_REQUEST, (
         "speak to someone", "speak to a person", "talk to a human", "human agent",
         "real person", "call me", "sales rep", "sales representative",
-        "someone contact me", "consultant to contact",
-        "speak to a human", "talk to a person", "speak to an agent",
+        "someone contact me", "consultant to contact", "speak to an agent",
         "talk to an agent", "to a human", "with a human", "speak to a real",
         "speak with someone", "talk to someone", "human being",
         "manager to resolve", "speak to a manager", "want a manager",
@@ -47,9 +42,9 @@ _INTENT_PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
         "submit my application", "where do i submit", "what are the steps",
     )),
     (Intent.COMPARISON, (
-        "cheaper", "another insurer", "other insurer", "competitor",
-        "compare", "comparing", "versus", " vs ", "difference between",
-        "different from", "better than", "how are you different",
+        "cheaper", "another insurer", "other insurer", "competitor", "compare",
+        "comparing", "versus", " vs ", "difference between", "different from",
+        "better than", "how are you different", "which plan",
     )),
     # Specific factual questions (claims, waiting period, eligibility, payment,
     # price) are checked before the family/corporate "orientation" intents
@@ -58,7 +53,8 @@ _INTENT_PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
     # about that specific thing, not a fresh statement of family/corporate
     # need, even though it mentions "family"/"corporate".
     (Intent.CLAIMS, (
-        "claim", "claims", "reimburse", "reimbursement", "payout", "submit a claim",
+        "claim", "claims", "reimburse", "reimbursement", "payout",
+        "submit a claim",
     )),
     (Intent.WAITING_PERIOD, (
         "waiting period", "how soon can i", "when can i claim",
@@ -97,9 +93,12 @@ _INTENT_PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
         "cover", "coverage", "hospital", "benefit", "benefits", "limit",
         "private", "outpatient", "inpatient", "specialist", "emergency",
         "protection", "insurance", "health insurance", "learn about",
-        "what is", "tell me about", "more about",
-        "introduce", "what plans", "what products", "what options",
-        "basic info", "basic information", "exclusion", "exclusions",
+        "what is", "tell me about", "more about", "introduce", "what plans",
+        "what products", "what options", "basic info", "basic information",
+        "exclusion", "exclusions",
+        # Direct plan interest. These advance a cold lead, but they are interest
+        # rather than preparation, so they must not be read as an application —
+        # otherwise "I want Plus" jumps straight to High Intent.
         "want plus", "want essential", "want the plus", "want the essential",
         "want the family plan", "want a plan", "interested in plus",
         "interested in essential", "interested in the plan",
@@ -113,7 +112,8 @@ _AFFIRMATIVE = frozenset((
     "that's right", "sounds good", "i agree", "please", "go ahead",
 ))
 
-_BUSINESS_TOPIC_TO_INTENT = {
+# What a bare "yes" means depends on what was just asked.
+_TOPIC_TO_INTENT = {
     "premium": Intent.PRICE,
     "price": Intent.PRICE,
     "cost": Intent.PRICE,
@@ -126,6 +126,7 @@ _BUSINESS_TOPIC_TO_INTENT = {
     "employee": Intent.CORPORATE_NEED,
 }
 
+_SHORT_MESSAGE_WORDS = 4
 
 # "Apply" is the one APPLICATION trigger word that also appears in ordinary
 # clauses about a plan's terms — "these exclusions apply to..." is a coverage
@@ -137,39 +138,39 @@ _APPLICATION_FALSE_POSITIVES = (
 )
 
 
-def detect(text: str, context: Optional[list[Message]] = None) -> Intent:
-    """Classify the customer's intent from keywords, or from context when ambiguous."""
-    normalized = f" {text.lower().strip()} "
-    for intent, phrases in _INTENT_PHRASES:
+def detect(text: str, context: list | None = None) -> Intent:
+    normalised = f" {text.lower().strip()} "
+    for intent, phrases in _PHRASES:
         if intent is Intent.APPLICATION and any(
-            fp in normalized for fp in _APPLICATION_FALSE_POSITIVES
+            fp in normalised for fp in _APPLICATION_FALSE_POSITIVES
         ):
             continue
-        if any(phrase in normalized for phrase in phrases):
+        if any(phrase in normalised for phrase in phrases):
             return intent
 
-    if context and len(text.split()) <= 4:
-        return _infer_from_context(text.lower().strip(), context)
+    if context and len(text.split()) <= _SHORT_MESSAGE_WORDS:
+        return _from_context(text.lower().strip(), context)
 
     return Intent.GENERIC
 
 
-def _infer_from_context(text: str, context: list[Message]) -> Intent:
-    business_msg = None
-    for msg in reversed(context):
-        if not msg.is_from_customer:
-            business_msg = msg
+def _from_context(text: str, context: list) -> Intent:
+    """Resolve an ambiguous short message against what was last discussed."""
+    last_business = None
+    for message in reversed(context):
+        if getattr(message, "role", None) is not None and not message.is_from_customer:
+            last_business = message
             break
-    if business_msg is None:
+    if last_business is None:
         return Intent.GENERIC
 
-    business_text = business_msg.text.lower()
+    lowered = last_business.text.lower()
     if text in _AFFIRMATIVE:
-        for keyword, intent in _BUSINESS_TOPIC_TO_INTENT.items():
-            if keyword in business_text:
+        for keyword, intent in _TOPIC_TO_INTENT.items():
+            if keyword in lowered:
                 return intent
 
-    if any(w in text for w in ("how much", "price", "cost")):
+    if any(word in text for word in ("how much", "price", "cost")):
         return Intent.PRICE
 
     return Intent.GENERIC

@@ -23,7 +23,7 @@
  * ideal one: no idempotency, no quick replies, no incremental fetch. That keeps
  * the degraded paths — including the retry duplicate warning — on the exercised
  * code path instead of a path nobody sees until task 4. See
- * docs/backend-contract.md Part B.
+ * docs/v0.0/backend/backend-contract.md Part B.
  */
 import { createMessage } from '../store.js';
 
@@ -33,7 +33,10 @@ const DEMO_DISCLAIMER =
   'not represent actual insurance quotations. Final premiums are subject to ' +
   'age, underwriting, plan selection and insurer assessment.';
 
-/** Replies served in order; the last one repeats once exhausted. */
+/**
+ * Default reply script — the nurture arc. Served in order; the last one repeats
+ * once exhausted.
+ */
 const REPLY_SCRIPT = [
   "Hi! I'm CareSure's AI sales assistant. I can help with plan information, " +
     'indicative premiums, coverage, eligibility, claims process and ' +
@@ -177,7 +180,49 @@ function renderingFixture() {
   ];
 }
 
-function readScenario() {
+/**
+ * Scripted scenarios (requirement 13.4). Each is a list of replies served in
+ * order; `takeover: n` flips the conversation to human handling from the nth
+ * reply onwards, which is what exercises the handoff treatment end to end.
+ *
+ * `fresh` uses the default nurture script above. `rendering` loads a transcript
+ * fixture instead of a reply script, for the rendering-rule checks.
+ */
+const SCENARIOS = {
+  nurture: {
+    replies: REPLY_SCRIPT,
+  },
+
+  hesitation: {
+    replies: [
+      'CareSure Plus gives you private-hospital access with an annual claim ' +
+        'limit up to S$500,000 per person.',
+      'Indicative premium: From S$1,500/year per adult, with a S$2,500 ' +
+        `deductible and 5% co-payment on eligible claims.\n${DEMO_DISCLAIMER}`,
+      'I understand price matters. I can only share CareSure-approved facts ' +
+        'rather than compare other insurers — a representative can talk you ' +
+        'through the value in detail.',
+      'That is completely reasonable. Take the time you need; I can send a ' +
+        'summary of the plan whenever you would like one.',
+    ],
+  },
+
+  takeover: {
+    replies: [
+      'CareSure Corporate covers employee groups under a single policy.',
+      'Corporate quotations need a human specialist, so I have created a case ' +
+        'for a CareSure representative to follow up with you directly.',
+      'A representative is now looking after your case and will reply here.',
+    ],
+    // From the second reply onwards the conversation is human-handled.
+    takeover: 2,
+    repName: 'Alex',
+  },
+};
+
+const SCENARIO_ALIASES = { fresh: 'nurture' };
+
+function readScenarioName() {
   try {
     return new URLSearchParams(window.location.search).get('scenario') || 'fresh';
   } catch {
@@ -186,28 +231,48 @@ function readScenario() {
 }
 
 export function createMockGateway() {
-  const scenario = readScenario();
+  const scenarioName = readScenarioName();
+  const scenario =
+    SCENARIOS[SCENARIO_ALIASES[scenarioName] ?? scenarioName] ?? SCENARIOS.nurture;
+
   // Captured now, not lazily — see readLatencyScale()'s comment.
   const latencyScale = readLatencyScale();
   const scaledDelay = (ms) => delay(ms * latencyScale);
   const latency = () => scaledDelay(MIN_LATENCY_MS + Math.random() * JITTER_MS);
-  let replyIndex = 0;
+
+  /** How many replies have been served; drives the script and the takeover point. */
+  let replyCount = 0;
 
   /** @type {Array<object>} */
-  let history = scenario === 'rendering' ? renderingFixture() : [];
+  let history = scenarioName === 'rendering' ? renderingFixture() : [];
 
   const nextReply = () => {
-    const text = REPLY_SCRIPT[Math.min(replyIndex, REPLY_SCRIPT.length - 1)];
-    replyIndex += 1;
+    const { replies } = scenario;
+    const text = replies[Math.min(replyCount, replies.length - 1)];
+    replyCount += 1;
     return text;
   };
+
+  /** True once the scenario's takeover point has been reached. */
+  const takeoverActive = () =>
+    typeof scenario.takeover === 'number' && replyCount >= scenario.takeover;
 
   return {
     name: 'mock',
 
     async loadHistory() {
-      await scaledDelay(scenario === 'fresh' ? 120 : 420);
-      return { messages: [...history], humanTakeover: false };
+      // Compare the scenario *name*: `scenario` is the resolved config object.
+      await scaledDelay(history.length === 0 ? 120 : 420);
+      return {
+        messages: [...history],
+        humanTakeover: false,
+        repName: null,
+        capabilities: {
+          idempotency: false,
+          quickReplies: false,
+          incrementalFetch: false,
+        },
+      };
     },
 
     async send({ text }) {
@@ -219,16 +284,22 @@ export function createMockGateway() {
         throw new Error('Mock transport: simulated send failure');
       }
 
+      const replyText = nextReply();
+      const humanTakeover = takeoverActive();
+
       const reply = createMessage({
         direction: 'in',
-        author: 'ai',
-        text: nextReply(),
+        // Once a human owns the conversation the reply is attributed to them,
+        // which is what drives the header change and the handoff banner.
+        author: humanTakeover ? 'human' : 'ai',
+        text: replyText,
       });
 
       return {
         messages: [reply],
         quickReplies: [],
-        humanTakeover: false,
+        humanTakeover,
+        repName: humanTakeover ? scenario.repName ?? null : null,
         // Mirrors the current backend. See the module comment.
         capabilities: {
           idempotency: false,
@@ -244,7 +315,7 @@ export function createMockGateway() {
 
     async reset() {
       history = [];
-      replyIndex = 0;
+      replyCount = 0;
     },
 
     async health() {

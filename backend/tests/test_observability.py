@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P4: agent run records, cost accounting and terminal rendering.
 
-Acceptance criteria from `docs/backend-plan.md` §9, restated as assertions:
+Acceptance criteria from `docs/v0.0/backend/backend-plan.md` §9, restated as assertions:
 
     1. A normal run prints one block with per-step kind, duration, status,
        model, tokens and cost, and totals that equal the sum of the parts.
@@ -228,7 +228,7 @@ class TestConsoleRendering(unittest.TestCase):
         text = render(run)
         lines = text.splitlines()
 
-        self.assertTrue(lines[0].startswith(f"▶ run {run.run_id}  C-1024  customer_message  key=c-8f2a1b40"))
+        self.assertTrue(lines[0].startswith(f"> run {run.run_id}  C-1024  customer_message  key=c-8f2a1b40"))
         self.assertEqual(len(lines), 1 + len(run.steps) + 1)
         extraction = lines[1]
         for column in ("0 extraction", "llm", "ms", "ok", "gpt-4o-mini", "412+88=500 tok", "$0.00011"):
@@ -237,7 +237,7 @@ class TestConsoleRendering(unittest.TestCase):
         self.assertIn("product=plus field=premium", lines[2])
         self.assertIn("retrieval", lines[4])
         footer = lines[-1]
-        self.assertIn("✔ ok", footer)
+        self.assertIn("[OK]", footer)
         self.assertIn(f"{run.duration_ms}ms", footer)
         self.assertIn("2 llm", footer)
         self.assertIn("1 tool", footer)
@@ -252,7 +252,9 @@ class TestConsoleRendering(unittest.TestCase):
         text = render(recorder.finish())
         self.assertIn("DEGRADED", text)
         self.assertIn("medical_question", text.splitlines()[1])
-        self.assertIn("⚠ degraded", text.splitlines()[-1])
+        footer = text.splitlines()[-1]
+        self.assertIn("[WARN]", footer)
+        self.assertIn("medical_question", footer)  # Reason is shown in footer
 
     def test_an_errored_run_renders_the_error_form(self):
         recorder = _recorder()
@@ -261,8 +263,9 @@ class TestConsoleRendering(unittest.TestCase):
                 raise ValueError("bad")
         text = render(recorder.finish())
         self.assertIn("ERROR", text)
-        self.assertIn("✖ error", text.splitlines()[-1])
-        self.assertIn("scoring raised", text.splitlines()[-1])
+        footer = text.splitlines()[-1]
+        self.assertIn("[ERROR]", footer)
+        self.assertIn("scoring raised", footer)
 
     def test_colour_is_off_by_default_in_render(self):
         recorder = _recorder()

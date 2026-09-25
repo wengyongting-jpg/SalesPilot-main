@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """The repository contract both backends implement.
 
-Four record kinds: opportunities, human cases, idempotency receipts and agent
-runs. Agent runs are stored and returned as plain dicts — the record type
+Stored records: opportunities, conversation memories, human cases, idempotency
+receipts and agent runs. Agent runs are stored and returned as plain dicts — the record type
 lives in `backend.observability`, which this package may not import
 (`test_architecture.py`), and a persisted run is read back only to be served,
 never re-computed.
@@ -19,6 +19,10 @@ from ..domain.case import HumanCase
 from ..domain.opportunity import Opportunity
 
 
+class MalformedCursor(ValueError):
+    """The `since` cursor was neither a known message id nor a timestamp."""
+
+
 class Repository(ABC):
     # ---- Opportunities ------------------------------------------------------
 
@@ -26,10 +30,20 @@ class Repository(ABC):
     def upsert_opportunity(self, opp: Opportunity) -> None: ...
 
     @abstractmethod
-    def get_opportunity(self, opportunity_id: str) -> Optional[Opportunity]: ...
+    def get_opportunity(
+        self, opportunity_id: str, *, history_limit: Optional[int] = None
+    ) -> Optional[Opportunity]: ...
 
     @abstractmethod
     def list_opportunities(self) -> list[Opportunity]: ...
+
+    @abstractmethod
+    def get_memory(self, opportunity_id: str) -> Optional[dict[str, Any]]: ...
+
+    @abstractmethod
+    def search_messages(
+        self, opportunity_id: str, query: str, *, limit: int = 3
+    ) -> list[dict[str, Any]]: ...
 
     @abstractmethod
     def delete_opportunity(self, opportunity_id: str) -> bool: ...
@@ -67,6 +81,18 @@ class Repository(ABC):
 
     @abstractmethod
     def save_run(self, run: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    def save_turn(
+        self,
+        opportunity: Opportunity,
+        run: dict[str, Any],
+        *,
+        case: Optional[HumanCase] = None,
+        receipt: Optional[dict[str, Any]] = None,
+        memory: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Persist all durable records produced by one completed customer turn."""
 
     @abstractmethod
     def get_run(self, run_id: str) -> Optional[dict[str, Any]]: ...

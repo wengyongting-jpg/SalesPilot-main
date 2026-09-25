@@ -179,7 +179,7 @@ body {
 }
 
 .header-btn:hover {
-  background: rgb(255 255 255 / 0.15);
+  background: var(--c-header-hover);
 }
 
 /* =============================================================================
@@ -331,6 +331,58 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Markdown formatting in AI messages */
+.bubble__text .message-paragraph {
+  margin: 0 0 0.5em 0;
+}
+
+.bubble__text .message-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.bubble__text .message-list {
+  margin: 0.5em 0;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+
+.bubble__text .message-list li {
+  margin: 0.25em 0;
+  padding-left: 0.3em;
+}
+
+.bubble__text .message-section {
+  margin: 0.75em 0;
+  padding: 0.5em 0.75em;
+  background: rgba(0, 0, 0, 0.05);
+  border-left: 3px solid var(--c-accent);
+  border-radius: 4px;
+}
+
+.bubble--in .bubble__text .message-section {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.bubble__text .message-section-label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--c-accent);
+  margin-bottom: 0.3em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bubble__text .message-section-text {
+  display: block;
+  font-size: 0.95em;
+  opacity: 0.9;
+}
+
+.bubble__text strong {
+  font-weight: 600;
+}
+
 .bubble--in .bubble__text {
   padding-right: var(--meta-reserve-in);
 }
@@ -410,7 +462,7 @@ body {
 }
 
 .retry:hover {
-  background: rgb(211 47 47 / 0.08);
+  background: var(--c-danger-hover);
 }
 
 /* =============================================================================
@@ -516,7 +568,7 @@ body {
   background: var(--c-input-bg);
   border: 0;
   border-radius: 50%;
-  box-shadow: var(--c-bubble-shadow), 0 2px 6px rgb(11 20 26 / 0.15);
+  box-shadow: var(--c-bubble-shadow), 0 2px 6px var(--c-elevation-soft);
   animation: jump-in var(--dur-fast) var(--ease-out);
 }
 
@@ -542,7 +594,7 @@ body {
 }
 
 /* =============================================================================
-   10. Quick replies (populated in task 5)
+   10. Quick replies
    ========================================================================== */
 
 .quick-replies {
@@ -555,6 +607,52 @@ body {
 
 .quick-replies:not(:empty) {
   padding: var(--sp-4) var(--sp-5) 0;
+}
+
+.quick-reply {
+  flex: 0 0 auto;
+  padding: var(--sp-3) var(--sp-5);
+  font: var(--t-chip);
+  color: var(--c-accent);
+  cursor: pointer;
+  background: var(--c-input-bg);
+  border: 1px solid var(--c-accent);
+  border-radius: var(--chip-radius);
+}
+
+.quick-reply:hover {
+  background: var(--c-system-bg);
+}
+
+.quick-reply:focus-visible {
+  outline: 3px solid var(--c-focus-ring);
+  outline-offset: 2px;
+}
+
+.question-choices:not(:empty) {
+  display: grid;
+  gap: var(--sp-2);
+  margin: var(--sp-3) var(--sp-5);
+  padding: var(--sp-3);
+  background: var(--c-input-bg);
+  border-radius: var(--chip-radius);
+}
+
+.question-choice {
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  text-align: left;
+  font: var(--t-chip);
+  color: var(--c-accent);
+  background: transparent;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--chip-radius);
+  cursor: pointer;
+}
+
+.question-choice:focus-visible {
+  outline: 3px solid var(--c-focus-ring);
+  outline-offset: 2px;
 }
 
 /* =============================================================================

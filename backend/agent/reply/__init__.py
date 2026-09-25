@@ -7,117 +7,58 @@ misled into thinking a model produced wording that a template did.
 """
 from __future__ import annotations
 
-from typing import Optional, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Optional, Protocol
 
+from ...domain.decision import NextBestAction
 from ...domain.detection import RetrievalResult
-from ...domain.message import Message
+from ...domain.enums import ReplyMode
+from ...domain.message import Generation, Message
 from ...observability import RunRecorder
-from . import template as _template
+from ...observability.violations import ModelViolation
 
 STEP_NAME = "response_generation"
 
 
+@dataclass
+class ReplyRequest:
+    """Everything a composer may see. Deliberately a closed list."""
+    facts: list[str]
+    action: NextBestAction
+    customer_name: str = ""
+    concern: Optional[str] = None
+    disclaimer: str = ""
+    # The observing segment's message history, so the composing segment continues
+    # one conversation instead of starting a second one.
+    history: Optional[list] = None
+
+
+@dataclass
+class ReplyOutcome:
+    text: str
+    generation: Generation
+    degraded: bool = False
+    degradation_reason: Optional[str] = None
+    violations: list[ModelViolation] = field(default_factory=list)
+    history: list[Any] = field(default_factory=list)
+    by_design: bool = False
+    usage: dict[str, Any] = field(default_factory=dict)
+
+
 class Composer(Protocol):
-    def compose(
-        self,
-        instruction: str,
-        retrieval: RetrievalResult,
-        *,
-        withdrawal: bool = False,
-        takeover: bool = False,
-        escalate: bool = False,
-        greeting: bool = False,
-        recorder: Optional[RunRecorder] = None,
-        customer_message: Optional[str] = None,
-    ) -> Message: ...
+    def compose(self, request: ReplyRequest) -> ReplyOutcome: ...
 
 
 OFFLINE_REASON = "no model configured — template reply"
 
 
-class TemplateComposer:
-    """The offline peer: always available, never calls a model.
-
-    `offline=True` marks the step degraded, for the reason given on
-    `extraction.RuleExtractor`: the peer is first class, the *run* is not.
-    """
-
-    def __init__(self, *, offline: bool = False) -> None:
-        self._offline = offline
-
-    def compose(
-        self,
-        instruction: str,
-        retrieval: RetrievalResult,
-        *,
-        withdrawal: bool = False,
-        takeover: bool = False,
-        escalate: bool = False,
-        greeting: bool = False,
-        recorder: Optional[RunRecorder] = None,
-        customer_message: Optional[str] = None,
-    ) -> Message:
-        return _template.compose(
-            retrieval=retrieval,
-            withdrawal=withdrawal,
-            takeover=takeover,
-            escalate=escalate,
-            greeting=greeting,
-            recorder=recorder,
-            degraded_reason=OFFLINE_REASON if self._offline else None,
-        )
-
-
-class ModelComposer:
-    """The model-based peer. Falls back to the template peer when the model is
-    unavailable, and says so on the run record."""
-
-    def __init__(self, model) -> None:
-        self._model = model
-
-    def compose(
-        self,
-        instruction: str,
-        retrieval: RetrievalResult,
-        *,
-        withdrawal: bool = False,
-        takeover: bool = False,
-        escalate: bool = False,
-        greeting: bool = False,
-        recorder: Optional[RunRecorder] = None,
-        customer_message: Optional[str] = None,
-    ) -> Message:
-        # Withdrawal/takeover/escalation replies are never model-generated —
-        # they are deterministic holding messages regardless of provider, the
-        # one part of the frozen build's design this rebuild keeps unchanged.
-        # A greeting is deliberately not in this list: it is not
-        # safety-sensitive, so a configured model composes it from
-        # `instruction` (already framed as "just greet, don't enumerate
-        # facts" by `policy.customer_safe_projection`) instead of being
-        # forced to the fixed template — this is where a model's own
-        # conversational range is worth using.
-        if withdrawal or takeover or escalate:
-            return _template.compose(
-                retrieval=retrieval,
-                withdrawal=withdrawal,
-                takeover=takeover,
-                escalate=escalate,
-                recorder=recorder,
-            )
-        from . import model_based
-
-        return model_based.compose(
-            instruction,
-            retrieval,
-            model=self._model,
-            recorder=recorder,
-            greeting=greeting,
-            customer_message=customer_message,
-        )
+# Import after dataclass definitions to avoid circular import
+from .model_based import ModelComposer
+from .template import TemplateComposer
 
 
 def build_composer(model=None) -> Composer:
-    """`model=None` selects the offline (template) peer, and says so on the record."""
+    """Build the appropriate composer based on model availability."""
     if model is None:
-        return TemplateComposer(offline=True)
+        return TemplateComposer()
     return ModelComposer(model)

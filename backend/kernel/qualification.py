@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """The qualification gate: is this conversation a sales opportunity at all?
 
-Specification: `docs/backend-contract.md` gap register item 13.
+Specification: `docs/v0.0/backend/backend-contract.md` gap register item 13.
 
 The previous build had no such question. Every conversation was scored as though it
 were a customer, so advertising traffic was scored as though it were buying — spam

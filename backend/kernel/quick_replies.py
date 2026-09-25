@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Quick replies: the tappable suggestions offered under the assistant's message.
 
-Contract: `docs/api/interface-v1.md` §5.5. At most three, labels at most 24
+Contract: `docs/v0.0/api/interface-v1.md` §5.5. At most three, labels at most 24
 characters, an empty array meaning "render nothing", and stable ids so a suggestion
 can be logged and tested.
 
@@ -58,6 +58,7 @@ _ALL = {
     "qr_add_family": QuickReply("qr_add_family", "Add a family member"),
     "qr_for_employees": QuickReply("qr_for_employees", "Cover for employees"),
     "qr_talk_to_person": QuickReply("qr_talk_to_person", "Talk to a person"),
+    "qr_more_details": QuickReply("qr_more_details", "Tell me more"),
 }
 
 # Where the conversation is decides what is worth offering next.
@@ -91,6 +92,10 @@ def catalogue() -> list[QuickReply]:
     """Every chip that can ever be offered. Exposed so the contract limits can be
     asserted across the whole set rather than sampled."""
     return list(_ALL.values())
+
+
+def more_details() -> QuickReply:
+    return _ALL["qr_more_details"]
 
 
 def suggest(opp, det: Detection) -> list[QuickReply]:

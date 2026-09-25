@@ -1,61 +1,65 @@
 # `backend/` — SalesPilot backend
 
-> ## This is the forward track
->
-> **All eight phases are in.** The package serves HTTP, runs a tool-calling
-> agent, persists to SQLite, records every run, and splits the customer and
-> staff surfaces by type rather than by filter.
+> ## The API and both frontend integration paths are operational for the demo.
 >
 > ```powershell
-> py -3 -m backend --serve --seed      # http://127.0.0.1:8000, docs at /docs
+> py -3 -m backend --serve --seed      # http://127.0.0.1:8000
 > ```
 >
-> It runs with **no model configured**: extraction falls to the rule-based peer
-> and replies to templates, every business message reports
-> `generation: "template"`, and every run reports `status: "degraded"` so the
-> offline path is visible rather than silent. Configure a key and the same
-> conversation reports `llm` and `ok`.
+> Both surfaces are live and both frontends can integrate against them. Everything
+> runs in **offline mode by default**: the pipeline completes on the rule-based and
+> template peers, and every reply is marked `generation: "template"` so nothing is
+> mistaken for model output. `/health` reports `degraded: true` while that is the case.
 >
-> The frozen `salespilot/` tree still runs and its 80 tests still pass, but it
-> is no longer maintained and is scheduled for deletion. Do not add to it.
+> To check the configured provider without a full conversation test (a configured
+> provider may receive a reachability request):
+>
+> ```powershell
+> py -3 -m backend --probe
+> ```
+>
+> The historical interface v1 contract is frozen:
+> [`interface-v1.md`](../docs/v0.0/api/interface-v1.md). Verify current behavior
+> against the implementation and tests; the archive is not a current readiness claim.
+>
+> The provider boundary is OpenAI-compatible. Offline mode, the direct OpenAI path
+> and the organiser-gateway configuration all resolve through the same model factory.
 
 | | |
 | --- | --- |
-| **Status** | Phases P0–P7 of 8 complete. Serving, persistent, instrumented. |
-| **Owner** | Backend track. Read-only for the frontend track. |
-| **Plan** | [`docs/backend-plan.md`](../docs/backend-plan.md) — reasoning, target architecture, phase-by-phase acceptance criteria |
-| **Wire contract** | [`docs/api/interface-v1.md`](../docs/api/interface-v1.md) — authoritative request/response shapes |
-| **Outstanding gaps** | [`docs/backend-contract.md`](../docs/backend-contract.md) — the register, with per-item tests |
-| **What changed when** | [`docs/backend-changelog.md`](../docs/backend-changelog.md) |
+| **Status** | Demo surfaces operate; SQLite persistence and evaluation repair are planned, not complete. |
+| **Current plan** | [`persistence-repair-plan.md`](../docs/v1.0/persistence-repair-plan.md) |
+| **Historical design** | [`backend-plan.md`](../docs/v0.0/backend/backend-plan.md) and [`interface-v1.md`](../docs/v0.0/api/interface-v1.md) |
 
 ---
 
 ## What works today
 
 ```powershell
-py -3 -m backend --probe             # effective configuration and model verdict
-py -3 -m backend --demo              # three scripted customers, in memory, with run traces
-py -3 -m backend --seed --db runtime/backend.db
-py -3 -m backend --serve --seed      # the API, on http://127.0.0.1:8000
-py -3 -m pytest backend/tests -q
+$env:SALESPILOT_LLM = 'offline' # prevents a local .env from enabling model calls
+py -3 -m backend --probe        # effective offline configuration
+py -3 -m backend --demo         # the whole pipeline in the terminal, no server
+py -3 -m backend --serve --seed # the API on http://127.0.0.1:8000
+py -3 -m unittest discover -s backend/tests
 ```
 
-231 tests, covering the layering rules, the domain model, the deterministic kernel,
-the agent shell, the run record, persistence, the orchestrator and both HTTP tiers.
+Remove the temporary override with `Remove-Item Env:SALESPILOT_LLM` before using
+the same terminal to test a configured LLM provider.
 
-### The surface
+The backend suite covers the deterministic kernel, agent shell, repositories,
+orchestrator, HTTP tiers, and provider resolution. Keep the provider in offline
+mode when running it to avoid paid model calls from a local `.env`. Do not infer
+current readiness from an older
+test count or archived phase checklist.
 
-| Tier | Endpoints |
-| --- | --- |
-| Customer | `POST /api/messages` · `GET|DELETE /api/conversations/{id}` (`?since=`) |
-| Staff | `/api/admin/*` — opportunities, cases, dashboard, analytics, seed, `agent-runs`, `rep-reply`, `disqualify`, `release`, `held` |
-| Both | `GET /health` |
+`--demo` is the one to reach for when the question is *what did the agent actually
+do*. It prints, for every turn, the detected intent and signals, the state transition,
+the score decomposed along both axes, the qualification verdict, the priority, the next
+best action, each tool the model chose to call, and the run's token count and cost. The
+two web surfaces show the customer's side and the sales queue; neither shows what
+happened in between.
 
-The frozen build's `/api/*` paths answer as admin aliases during migration.
-What a customer receives is bounded by `api/schemas/customer.py`, which has no
-field for a score, a state, a signal or any telemetry.
-
-## Progress
+## Historical rebuild phases
 
 | Phase | Delivers | Status |
 | --- | --- | --- |
@@ -66,10 +70,11 @@ field for a score, a state, a signal or any telemetry.
 | **P4** | `observability/` — agent run records, cost accounting, terminal rendering | **done** |
 | **P5** | `storage/` + `services/` — persistence, idempotency, the orchestrator | **done** |
 | **P6** | `api/` — the HTTP surface, split by visibility tier | **done** |
-| **P7** | Model access, demo, interface freeze | **done** |
+| **P7** | Model access, API testing, `--demo`, interface freeze | **done** |
 
-Outstanding: neither frontend's real adapter is written yet, so the two apps have
-not been run against this backend. That work belongs to the frontend track.
+These are records of the earlier rebuild, not a claim that persistence repair is
+finished. With no model configured the pipeline runs on the
+rule-based and template peers, and every reply is marked `generation: "template"`.
 
 ## Why a rebuild rather than a refactor
 
@@ -90,7 +95,7 @@ not code quality:
 - **Almost no observability.** One log line per message. No per-step timing, no token
   or cost accounting, no way to see that a step had degraded.
 
-Full account with the measurements: [`docs/backend-plan.md`](../docs/backend-plan.md)
+Full account with the measurements: [`docs/v0.0/backend/backend-plan.md`](../docs/v0.0/backend/backend-plan.md)
 §1.
 
 ## Layout
@@ -115,7 +120,7 @@ domain  <-  kernel  <-  services  ->  agent  ->  providers
 | `observability/` | Agent run records, cost, terminal rendering. Never imported by `domain` or `kernel`. |
 | `providers/` | Model transports, including an offline provider that forces the deterministic path. |
 | `storage/` | Repositories: in-memory and SQLite. |
-| `services/` | Use-cases. Owns transactions, idempotency and run records. The only package that writes storage. |
+| `services/` | Use-cases and orchestration of idempotency and run records. Atomic SQLite writes remain a planned repair. |
 | `api/` | The HTTP surface, split by visibility tier. |
 
 `backend/tests/test_architecture.py` fails the build on a layering violation, on
@@ -134,11 +139,9 @@ the model can skip is not a rule.
 domain does not accept fails validation and is recorded as a model contract violation.
 It is never silently downgraded — which is exactly what used to happen.
 
-## Contributing while this is in flight
+## Contributing
 
-- Phases are sequential; each leaves the tree importable and has executable acceptance
-  criteria. Do not start one before its predecessor is green.
-- Tests first. Tests live in `backend/tests/`, separate from the frozen top-level
-  `tests/`.
-- Do not add anything to `salespilot/`. It is frozen.
-- Do not touch `frontend/**` or `.kiro/specs/**`. Raise the need instead.
+- Keep business decisions in `kernel/`; model output remains advisory.
+- Keep visibility tiers explicit: customer projections must never contain sales
+  intelligence.
+- Run the backend and frontend suites after changing a shared wire shape.

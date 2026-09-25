@@ -1,288 +1,124 @@
 # SalesPilot
 
-> SalesPilot turns customer conversations into structured sales opportunities.
+SalesPilot is a hackathon prototype for CareSure, a fictional Singapore health
+insurer. It combines a customer chat with a staff console: customers receive
+approved product information, while staff see sales signals, opportunity state,
+score, priority, agent traces and human-handoff cases.
 
-> **Where the code is, as of 2026-09-22.** This README describes `salespilot/`, which
-> works and is what to run today — but it is **frozen** and will be deleted once its
-> replacement lands. The replacement is `backend/`, an agentic rebuild that is **not
-> usable yet**: no HTTP surface, no model access, no storage. See
-> [`backend/README.md`](backend/README.md) for its status and
-> [`docs/backend-plan.md`](docs/backend-plan.md) for why it is being rebuilt rather
-> than refactored. Add nothing to `salespilot/`.
+The model is deliberately not the business authority. Deterministic backend rules
+own qualification, scoring, state transitions, escalation and cost limits. An LLM
+may extract observations and select approved knowledge facts for a response;
+offline mode uses rule-based extraction and templates and labels that fact clearly.
 
-SalesPilot is an AI sales assistant for **CareSure Health Insurance** (fictional
-insurer). It does not simply answer customer questions — it continuously
-analyses every message in a WhatsApp-style conversation, detects sales signals,
-tracks the customer's position in the buying journey, scores the opportunity
-value, determines priority, recommends the next best action, and escalates to
-a human sales representative when needed.
+## Run locally
 
-## Problem
+Python 3.10+ and a current Node.js are sufficient. The frontend has no packages to
+install and no build step.
 
-Sales teams receive large volumes of repetitive customer enquiries through
-messaging channels. Manually triaging these conversations to identify and
-prioritise valuable sales opportunities is slow, inconsistent, and does not
-scale. Reps cannot tell at a glance who needs attention now, why, or what to do
-next.
-
-## Solution
-
-SalesPilot converts conversations into structured sales opportunities. Each
-customer message flows through a deterministic pipeline that updates the
-opportunity profile in real time, so sales reps always see the current state,
-signals, score, priority, and recommended action for every customer.
-
-## Innovation
-
-1. **Dynamic Opportunity Intelligence** — A state machine tracks each customer
-   through six buying-journey states (Cold Lead → Potential Interest →
-   Evaluation & Hesitation → High Intent → Closed/Active → Dormant/Lost).
-   State transitions are driven by defined conditions, not by individual
-   signals.
-   
-2. **Sales Signal Detection** — Every message is analysed for observable
-   sales, risk, and lifecycle signals, including Purchase, Hesitation,
-   Competitive, Expansion, Withdrawal, Conversion, Negotiation, Human
-   Intervention, and Compliance Risk. Signals accumulate on the opportunity
-   profile and feed into scoring and next-best-action logic — but they never
-   automatically change the state.
-
-3. **Opportunity Value Scoring** — A unified 100-point scoring system
-   (Purchase Intent 30 + Readiness 20 + Product Potential 20 + Expansion 15 +
-   Engagement 15) produces a sales-priority score. Risk flags (competitive,
-   compliance) never add points — they drive escalation instead.
-
-4. **AI-to-Human Handoff** — Deterministic HITL rules trigger human takeover
-   for personalised underwriting, claims, custom quotations, corporate
-   negotiation, complaints, explicit human requests, and high-value
-   competitive-risk opportunities. When human handling is active, the AI
-   stops making autonomous customer-facing sales decisions.
-
-## Core Workflow
-
-```
-Customer Message
-      ↓
-Conversation History
-      ↓
-Intent & Context Understanding
-      ↓
-Opportunity State Detection
-      ↓
-Sales Signal Detection
-      ↓
-Update Opportunity Profile
-      ↓
-Opportunity Value Score
-      ↓
-Priority
-      ↓
-Next Best Action
-      ↓
-Compliance / Permission Check
-      ↓
-Answer / Nurture / Follow-up / Human Handoff
-      ↓
-Save Decision + Score History
-      ↓
-Next Customer Message  ↺
-```
-
-## Technology
-
-| Layer | Technology |
-| --- | --- |
-| LLM | Pluggable provider interface; offline stub by default, OpenAI-compatible adapter included |
-| RAG | Rule-based retriever (default) + hybrid semantic retriever (local embeddings + vector store) |
-| Decision Engine | Deterministic state machine, scoring, priority, next-best-action, HITL rules |
-| State Machine | Six-state opportunity lifecycle with condition-based transitions |
-| FastAPI | REST API with 8 endpoints; serves the web frontend at `/` |
-| Database | SQLite (opportunities, cases, score history, state history, messages) |
-| Frontend | WhatsApp-style chat + sales intelligence panel + dashboard + customer view (served by FastAPI) |
-| AWS deployment | Container-ready; deploy to AWS via ECS/Lambda behind an ALB |
-
-> RAG and LLM support the pipeline by providing grounded product answers and
-> conversation context. They are **not** the primary innovation — the core
-> intelligence is sales opportunity understanding.
-
----
-
-## Quick Start
-
-> **Requires Python 3.10 or newer.** SalesPilot uses modern `X | None` type
-> syntax, so it will not run on Python 3.9 or older. If you start it with an
-> older interpreter, `run.py` stops immediately with a clear message telling
-> you to use Python 3.11 (or any 3.10+). Check your version with
-> `python3 --version`.
-
-Requirements: Python 3.10+ (developed on Python 3.14 using the `py` launcher).
+### Quick Start (Zero Cost)
 
 ```powershell
-cd D:\SalesPilot
-
-# Install dependencies (fastapi, uvicorn, httpx, pytest)
 py -3 -m pip install -r requirements.txt
-
-# Start the API server with demo data + web UI
-py -3 run.py --serve --seed
-#   Open http://127.0.0.1:8000          → SalesPilot web UI
-#   Open http://127.0.0.1:8000/docs      → Interactive API docs
-
-# Scripted demo (no install needed)
-py -3 run.py --demo
-
-# Interactive CLI chat
-py -3 run.py
-#   In-chat commands: /dashboard  /customer  /cases  /reset  /help  /quit
-
-# Run the tests
-py -3 -m pytest tests/ -v
+py -3 -m backend --serve --seed
 ```
 
-## Architecture
-
-```
-                     ┌──────────────────────────────────┐
-  Web UI / CLI ─────▶│  FastAPI REST + Static file layer │  api/, cli.py
-                     └──────────────┬───────────────────┘
-                                    │ AgentResult
-                     ┌──────────────▼───────────────────┐
-                     │       Agent workflow (12 steps)   │  agent/assistant.py
-                     │ detect → state → signals → profile│
-                     │ → RAG → score → NBA → compliance  │
-                     │ → response → save history         │
-                     └───┬───────┬───────┬───────────────┘
-          detection/     engine/  knowledge/  response/
-          (rules +       state,    retriever   generator
-           context)      scoring,  (rule or    (template or
-                          decision, semantic)   LLM, safe
-                          HITL                  fallback)
-                                    │
-                     ┌──────────────▼───────────────────┐
-                     │ Provider abstraction layer        │  providers/
-                     │ LLMClient · Embedder · VectorStore│
-                     │ (offline stubs / hashing /        │
-                     │  in-memory; OpenAI-compat adapter)│
-                     └──────────────┬───────────────────┘
-                                    │ BaseRepository
-                     ┌──────────────▼───────────────────┐
-                     │ In-memory Repository /            │  storage/
-                     │ SQLite (opportunities, cases,      │  + analytics/
-                     │ score history, state history)     │
-                     └──────────────────────────────────┘
-```
-
-## Project Structure
-
-```
-SalesPilot/
-├── run.py                          # Entry point
-├── requirements.txt                # fastapi, uvicorn, httpx, pytest
-├── logs/                           # Auto-created at runtime
-├── runtime/                        # Auto-created: SQLite database location
-├── salespilot/
-│   ├── data/knowledge_base.json    # Structured KB for four CareSure products
-│   ├── models.py                   # Enums, Opportunity, NextBestAction, ScoreCard
-│   ├── config.py                   # Paths, thresholds, provider env settings
-│   ├── logging_utils.py            # Logging setup
-│   ├── detection/                  # Intent, product, signal detectors (with context)
-│   ├── knowledge/
-│   │   ├── retriever.py            # Rule retrieval with confidence score
-│   │   └── semantic.py             # Hybrid semantic retriever
-│   ├── engine/
-│   │   ├── state.py                # 6-state opportunity state machine
-│   │   ├── scoring.py              # 100-point Opportunity Value Score
-│   │   ├── decision.py             # Next best action (structured result)
-│   │   └── hitl.py                 # HITL escalation rules and case creation
-│   ├── response/
-│   │   ├── generator.py            # Grounded template generator (nurture/answer/follow-up)
-│   │   └── llm_generator.py        # LLM generator with deterministic fallback
-│   ├── providers/                  # Pluggable LLM / embedder / vector store
-│   ├── storage/
-│   │   ├── base.py                 # BaseRepository interface
-│   │   ├── repository.py           # In-memory repository
-│   │   └── sqlite_repo.py          # SQLite repository
-│   ├── analytics/metrics.py        # Sales analytics (FR-15)
-│   ├── agent/assistant.py          # 12-step workflow orchestration
-│   ├── api/                        # FastAPI service + Pydantic schemas + static serving
-│   ├── static/                     # Web frontend (HTML/CSS/JS)
-│   ├── dashboard.py                # Text dashboard / customer view
-│   ├── demo.py                     # Scripted Sarah / Michael / ABC conversations
-│   ├── seed.py                     # Idempotent demo-data seeding
-│   └── cli.py                      # CLI flags
-└── tests/                          # 31 test cases across all layers
-```
-
-## REST API
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/` | SalesPilot web UI (chat + dashboard + customer view) |
-| GET | `/health` | Liveness, opportunity and open-case counts |
-| POST | `/api/messages` | Process one customer message; returns reply, opportunity, score, NBA, case |
-| GET | `/api/opportunities` | List all opportunity profiles |
-| GET | `/api/opportunities/{id}` | One opportunity profile with score and state history |
-| GET | `/api/cases` | List HITL cases |
-| GET | `/api/dashboard` | Dashboard with structured queue items |
-| GET | `/api/analytics` | Sales analytics (funnel, priority mix, signals, conversion rate) |
-| POST | `/api/seed` | Seed demo data (idempotent) |
-
-Examples:
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/messages \
-  -H "Content-Type: application/json" \
-  -d '{"customer_id":"C-2001","customer_name":"Sam","text":"How much does CareSure Plus cost?"}'
-
-curl http://127.0.0.1:8000/api/analytics
-```
-
-## Configuration
-
-Environment variables (all optional — defaults are fully offline):
-
-| Variable | Default | Effect |
-| --- | --- | --- |
-| `SALESPILOT_LLM` | `stub` | `stub` (offline) or `openai` |
-| `SALESPILOT_LLM_MODEL` | `gpt-4o-mini` | Chat model name |
-| `SALESPILOT_LLM_BASE_URL` | — | Base URL for compatible gateways |
-| `SALESPILOT_LLM_API_KEY` / `OPENAI_API_KEY` | — | API key |
-| `SALESPILOT_HOST` / `SALESPILOT_PORT` | `127.0.0.1` / `8000` | API bind address |
-
-CLI flags: `--demo`, `--serve`, `--seed`, `--db PATH`, `--semantic`, `--llm`,
-`--host`, `--port`.
-
-## Scoring
-
-Opportunity Value Score (100 points):
-
-| Dimension | Max | Scoring |
-| --- | --- | --- |
-| Purchase Intent | 30 | 0–5 generic / 6–15 interest / 16–24 evaluating / 25–30 explicit |
-| Purchase Readiness | 20 | 0–5 exploring / 6–10 comparing / 11–16 application docs / 17–20 ready |
-| Product Potential | 20 | Essential 5 / Family 10 / Plus 15 / Corporate 20 |
-| Expansion Opportunity | 15 | None 0 / Possible 5 / Family 8–10 / Multiple 11–15 |
-| Engagement & Urgency | 15 | Low 0–4 / Some 5–8 / Active 9–12 / Time-sensitive 13–15 |
-
-Priority bands: **High ≥ 80**, **Medium ≥ 50**, **Low < 50**.
-
-Competitive Risk, Compliance Risk, and Human Request never add points to the
-score — they drive Next Best Action and HITL escalation instead.
-
-## Tests
+In a second terminal:
 
 ```powershell
-py -3 -m pytest tests/ -v
+cd frontend
+py -3 -m http.server 8123
 ```
 
-Coverage: classifiers with context, state machine transitions, scoring
-dimensions, HITL triggers, end-to-end 4-message journey, SQLite round-trip,
-semantic RAG, provider fallback, analytics, and REST API via TestClient.
+Open:
 
-## Notes
+- Customer chat: http://127.0.0.1:8123/customer/index.html
+- Staff console: http://127.0.0.1:8123/admin/index.html#/inbox
+- API health: http://127.0.0.1:8000/health
 
-- All premium figures are fictional indicative rates for demo purposes only.
-- The Opportunity Value Score supports sales prioritisation only. It never
-  determines eligibility, pricing, underwriting, or claims decisions.
-- The AI never autonomously performs underwriting, medical decisions, claim
-  approvals, custom quotations, corporate pricing, or eligibility decisions.
+### Configuration
+
+**Default Mode: Offline (Zero Cost)**
+
+By default, the backend runs in offline mode using rule-based extraction and template
+replies. Every message is marked `generation: "template"` and `/health` reports
+`degraded: true`.
+
+To inspect the effective configuration or run the backend tests in offline mode:
+
+```powershell
+$env:SALESPILOT_LLM = 'offline'
+py -3 -m backend --probe
+py -3 -m unittest discover -s backend/tests
+```
+
+If you use the same PowerShell session for LLM mode later, remove that override
+with `Remove-Item Env:SALESPILOT_LLM` first; otherwise it takes precedence over
+the value in `.env`.
+
+**Optional: Enable LLM Mode (Costs Money)**
+
+⚠️ **Warning:** Enabling LLM mode will make API calls and incur charges.
+
+1. Copy the example configuration:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+2. Edit `.env` and set:
+   ```bash
+   SALESPILOT_LLM=gateway              # or 'openai'
+   SALESPILOT_LLM_API_KEY=your-api-key
+   SALESPILOT_LLM_MODEL=your-model-name
+   SALESPILOT_LLM_BASE_URL=https://your-endpoint/v1
+   ```
+
+3. Verify configuration:
+   ```powershell
+   py -3 -m backend --probe
+   ```
+
+   In LLM mode, `--probe` checks provider reachability and may make a network
+   request. Run the test suite with `SALESPILOT_LLM=offline` to prevent an
+   existing local `.env` from enabling paid model calls during verification.
+
+**Cost Limits:**
+- Default: $0.03 per message (configurable via `SALESPILOT_LLM_COST_LIMIT_USD`)
+- Tool calls: max 3 per message
+- Token limit: 12,000 per message
+
+See [.env.example](.env.example) for all available configuration options.
+
+## Verify
+
+```powershell
+$env:SALESPILOT_LLM = 'offline'
+py -3 -m unittest discover -s backend/tests
+node --test "frontend/tests/**/*.test.js"
+```
+
+These commands run the maintained suites. The archived documents contain older
+test counts that should not be used as a current baseline. The known SQLite
+handoff-persistence gap is described in the
+[v1.0 repair plan](docs/v1.0/persistence-repair-plan.md).
+
+## Repository map
+
+```text
+backend/                 Python service, agent runtime and deterministic kernel
+frontend/customer/       Customer-safe chat surface
+frontend/admin/          Staff inbox, cases, traces and test harness
+backend/knowledge/data/  Approved product knowledge base
+runtime/                 Local SQLite data
+evals/                   Portable evaluation cases and runner
+docs/v1.0/               Current work and review plans
+docs/v0.0/               Historical contracts, Kiro-era specs and delivery records
+```
+
+Important demo limitations: there is no authentication or multi-tenancy, WhatsApp
+Cloud API delivery is not implemented, and delivery ticks are client milestones
+rather than server read receipts. All premium figures are fictional.
+
+See [backend/README.md](backend/README.md) and [frontend/README.md](frontend/README.md)
+for current architecture and operating details, and [docs/README.md](docs/README.md)
+for the document map. Historical API contracts are preserved under `docs/v0.0/api/`;
+verify current behavior against the implementation and tests.

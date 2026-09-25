@@ -74,7 +74,7 @@ class RetrievalResult:
     def mentions_premium(self) -> bool:
         """Whether any approved fact quotes a premium — the single source of
         truth for "must the demo disclaimer be appended" (a compliance red
-        line: `.kiro/steering/product.md`), shared by both reply peers so a
+        line: `docs/v0.0/product/product.md`), shared by both reply peers so a
         template answer and a model answer are held to the same rule."""
         return any("premium" in fact.lower() for fact in self.facts)
 

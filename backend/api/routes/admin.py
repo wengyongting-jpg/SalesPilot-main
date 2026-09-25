@@ -1,161 +1,220 @@
 # -*- coding: utf-8 -*-
-"""The staff console's surface — `/api/admin/*`.
+"""The admin surface. `docs/v0.0/api/interface-v1.md` §5.1, §5.3, §5.4.
 
-Two routers. `router` carries the endpoints the frozen build already had and
-is mounted twice — under `/api/admin` and, as `interface-v1.md` §5.1 allows
-during migration, at the old `/api` paths. `admin_only` carries what only
-the rebuild offers (agent runs, rep reply, the qualification actions) and is
-mounted once. Full intelligence everywhere; this is the tier that may see it.
+The inverse of the customer tier: full sales intelligence, including model telemetry.
+Responses are the service layer's canonical dictionaries, so the console reads exactly
+what the pipeline produced rather than a re-declared copy of it.
+
+There is no authentication here, or anywhere. That is a recorded and accepted demo
+limitation, not an oversight: anyone who can reach this surface can read every
+transcript and take over any case. It is documented in `interface-v1.md` §2 and
+`docs/v0.0/product/product.md`, deliberately rather than papered over with a fake login.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Request
 
-from ... import config
-from ...services import analytics, cases, opportunities, seeding
-from ...services.conversation import ConversationService
-from ...services.rep_reply import append_rep_reply
-from ...storage.base import Repository
-from ..deps import get_repo, get_service
-from ..schemas.admin import DEFAULT_HISTORY_LIMIT, opportunity_to_wire, summary_to_wire
-from ..schemas.shared import (
-    CaseStatusUpdate,
-    DisqualifyIn,
-    ReleaseIn,
-    RepReplyIn,
-    case_to_wire,
-    message_to_wire,
+from ...services import CaseNotFound, OpportunityNotFound
+from ...services.cases import parse_status
+from ...services.seeding import seed
+from ...services.serialisation import (
+    case_to_dict,
+    message_to_dict,
+    opportunity_to_dict,
 )
+from ...storage.base import MalformedCursor
+from .. import errors
+from ..deps import services_of
+from ..schemas.admin import CaseStatusUpdate, RepReplyRequest
 
-router = APIRouter()
-admin_only = APIRouter()
-
-
-# ---- Opportunities -------------------------------------------------------------
+router = APIRouter(tags=["admin"], prefix="/api/admin")
 
 
 @router.get("/opportunities")
-def list_opportunities(repo: Repository = Depends(get_repo)) -> dict:
-    items = [summary_to_wire(o) for o in repo.list_opportunities()]
-    return {"count": len(items), "items": items}
+def list_opportunities(request: Request, history_limit: Optional[int] = None) -> dict:
+    """All opportunities with optional history trimming."""
+    repo = services_of(request).repo
+    opportunities = [
+        opportunity_to_dict(repo.get_opportunity(opp.id, history_limit=history_limit))
+        for opp in repo.list_opportunities()
+    ]
+    return {"count": len(opportunities), "items": opportunities}
+
+
+@router.get("/dashboard")
+def dashboard(request: Request) -> dict:
+    """The queue. `docs/v0.0/api/interface-v1.md` §5.2.
+
+    Does not return the full detail per item — it trims messages, score history and
+    state history so a 100-item list does not carry 100 full transcripts. The admin
+    console's grid is shallow by design; full detail lives on the opportunity endpoint
+    and is loaded only when the operator opens a row.
+    """
+    services = services_of(request)
+    opportunities = services.repo.list_opportunities()
+
+    # Exclude held, which are not autonomous sales yet and the gap task says are not
+    # for the queue.
+    from ...domain.enums import Qualification
+    sellable = [o for o in opportunities if o.qualification is not Qualification.HELD]
+
+    # Trim to the shapes the console grid actually uses. One message, zero histories:
+    # faster than loading every field on 100 profiles, and avoids an ever-growing
+    # transcript or score/state histories. Full detail stays on the opportunity
+    # endpoint and is loaded only when an operator opens a row.
+    items = []
+    for opportunity in sellable:
+        item = opportunity_to_dict(opportunity)
+        active_case = services.repo.active_case_for(opportunity.id)
+        item["attention_reason"] = (
+            active_case.reason if active_case else
+            opportunity.pending_handoff_reason or opportunity.main_concern
+        )
+        item["messages"] = item["messages"][-1:]
+        item["score_history"] = []
+        item["state_history"] = []
+        items.append(item)
+
+    return {
+        "total": len(sellable),
+        "held": len(opportunities) - len(sellable),
+        "take_over": sum(1 for opp in sellable if opp.human_takeover),
+        "items": items,
+    }
 
 
 @router.get("/opportunities/{opportunity_id}")
 def get_opportunity(
     opportunity_id: str,
-    since: Optional[str] = Query(default=None),
-    history_limit: int = Query(default=DEFAULT_HISTORY_LIMIT, ge=1, le=1000),
-    repo: Repository = Depends(get_repo),
+    request: Request,
+    since: Optional[str] = None,
+    history_limit: Optional[int] = None,
 ) -> dict:
-    opp = opportunities.require(repo, opportunity_id)
-    return opportunity_to_wire(
-        opp,
-        messages=opportunities.messages_since(opp, since),
-        case=repo.active_case_for(opp.id),
-        next_best_action=opportunities.current_next_best_action(opp),
-        history_limit=history_limit,
-    )
+    """One profile in full.
+
+    `since` and `history_limit` exist because this is the endpoint the console polls,
+    and it carries the most fields — gap register item 12. Without them a poll grows
+    with the conversation, which compounds to quadratic traffic over a session.
+    """
+    repo = services_of(request).repo
+    opportunity = repo.get_opportunity(opportunity_id, history_limit=history_limit)
+    if opportunity is None:
+        raise OpportunityNotFound(opportunity_id)
+
+    payload = opportunity_to_dict(opportunity)
+    if since is not None:
+        try:
+            from ...services import opportunities as opp_service
+            newer = opp_service.messages_since(opportunity, cursor=since)
+        except MalformedCursor as error:
+            raise errors.bad_request(str(error))
+        payload["messages"] = [message_to_dict(message) for message in newer]
+    return payload
 
 
-@router.delete("/opportunities/{opportunity_id}")
-def delete_opportunity(opportunity_id: str, repo: Repository = Depends(get_repo)) -> dict:
-    return {"deleted": opportunities.reset(repo, opportunity_id), "opportunity_id": opportunity_id}
+@router.get("/opportunities/{opportunity_id}/cost")
+def get_opportunity_cost(opportunity_id: str, request: Request) -> dict:
+    """Token totals for one opportunity. `docs/v0.0/api/interface-v1.md` §5.5."""
+    repo = services_of(request).repo
+    runs = repo.list_runs(opportunity_id=opportunity_id)
 
+    # Calculate total cost
+    total_cost = 0.0
+    pricing_known = True  # Assume known until we find a run without cost
+    for run in runs:
+        if run.get("total_cost"):
+            total_cost += run["total_cost"]["amount"]
+        else:
+            pricing_known = False
 
-# ---- Cases ---------------------------------------------------------------------
-
-
-@router.get("/cases")
-def list_cases(repo: Repository = Depends(get_repo)) -> dict:
-    items = [case_to_wire(c) for c in repo.list_cases()]
-    return {"count": len(items), "items": items}
-
-
-@router.patch("/cases/{case_id}")
-def update_case(case_id: str, body: CaseStatusUpdate, repo: Repository = Depends(get_repo)) -> dict:
-    status = cases.parse_status(body.status)
-    return case_to_wire(cases.set_status(repo, case_id, status))
-
-
-# ---- Dashboard, analytics, seed ----------------------------------------------
-
-
-@router.get("/dashboard")
-def dashboard(repo: Repository = Depends(get_repo)) -> dict:
-    opps = repo.list_opportunities()
     return {
-        "text": seeding.render_summary(repo),
-        "total": len(opps),
-        "take_over": sum(1 for o in opps if o.human_takeover),
-        "items": [summary_to_wire(o) for o in opps],
+        "run_count": len(runs),
+        "total_tokens": sum(run.get("totals", {}).get("total_tokens", 0) for run in runs),
+        "input_tokens": sum(run.get("totals", {}).get("input_tokens", 0) for run in runs),
+        "output_tokens": sum(run.get("totals", {}).get("output_tokens", 0) for run in runs),
+        "cost": {
+            "amount": round(total_cost, 5),
+            "pricing_known": pricing_known,
+        },
     }
 
 
-@router.get("/analytics")
-def get_analytics(repo: Repository = Depends(get_repo)) -> dict:
-    return analytics.compute_analytics(repo)
-
-
-@router.post("/seed")
-def seed(service: ConversationService = Depends(get_service)) -> dict:
-    return seeding.seed(service)
-
-
-# ---- Rebuild-only ------------------------------------------------------------------
-
-
-@admin_only.get("/agent-runs")
-def list_agent_runs(
-    opportunity_id: Optional[str] = Query(default=None),
-    client_message_id: Optional[str] = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=500),
-    repo: Repository = Depends(get_repo),
+@router.post("/opportunities/{opportunity_id}/rep-reply")
+def post_rep_reply(
+    opportunity_id: str, payload: RepReplyRequest, request: Request
 ) -> dict:
-    items = repo.list_runs(opportunity_id=opportunity_id, client_message_id=client_message_id, limit=limit)
-    return {"count": len(items), "items": items, "content_enabled": config.TELEMETRY_CONTENT}
-
-
-@admin_only.get("/agent-runs/{run_id}")
-def get_agent_run(run_id: str, repo: Repository = Depends(get_repo)) -> dict:
-    run = repo.get_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Agent run not found")
-    return run
-
-
-@admin_only.post("/opportunities/{opportunity_id}/rep-reply")
-def rep_reply(opportunity_id: str, body: RepReplyIn, repo: Repository = Depends(get_repo)) -> dict:
-    message = append_rep_reply(
-        repo,
+    """Append a representative's own message. `docs/v0.0/api/interface-v1.md` §5.4."""
+    message = services_of(request).rep_reply.reply(
         opportunity_id,
-        text=body.text,
-        rep_name=body.rep_name,
-        client_message_id=body.client_message_id,
+        text=payload.text,
+        rep_name=payload.rep_name,
+        client_message_id=payload.client_message_id,
     )
-    return {"message": message_to_wire(message)}
+    return message_to_dict(message)
 
 
-@admin_only.post("/opportunities/{opportunity_id}/disqualify")
-def disqualify(opportunity_id: str, body: DisqualifyIn, repo: Repository = Depends(get_repo)) -> dict:
-    return summary_to_wire(cases.disqualify(repo, opportunity_id, reason=body.reason))
-
-
-@admin_only.post("/opportunities/{opportunity_id}/release")
-def release(
-    opportunity_id: str, body: Optional[ReleaseIn] = None, repo: Repository = Depends(get_repo)
-) -> dict:
-    return summary_to_wire(cases.release(repo, opportunity_id, reason=body.reason if body else None))
-
-
-@admin_only.get("/held")
-def held(repo: Repository = Depends(get_repo)) -> dict:
-    items = [summary_to_wire(o) for o in opportunities.held(repo)]
+@router.get("/cases")
+def list_cases(request: Request) -> dict:
+    """All cases, open and closed."""
+    cases = services_of(request).repo.list_cases()
+    items = [case_to_dict(case) for case in cases]
     return {"count": len(items), "items": items}
 
 
-@admin_only.get("/opportunities/{opportunity_id}/score-explain")
-def score_explain(opportunity_id: str, repo: Repository = Depends(get_repo)) -> dict:
-    opp = opportunities.require(repo, opportunity_id)
-    return opportunities.score_explanation(opp)
+@router.get("/cases/{case_id}")
+def get_case(case_id: str, request: Request) -> dict:
+    """One case in full."""
+    case = services_of(request).repo.get_case(case_id)
+    if case is None:
+        raise CaseNotFound(case_id)
+    return case_to_dict(case)
+
+
+@router.patch("/cases/{case_id}")
+def update_case_status(
+    case_id: str, payload: CaseStatusUpdate, request: Request
+) -> dict:
+    """Transition a case. `docs/v0.0/api/interface-v1.md` §4.4."""
+    status = parse_status(payload.status)
+    case = services_of(request).cases.set_status(case_id, status)
+    return case_to_dict(case)
+
+
+@router.get("/analytics")
+def get_analytics(request: Request) -> dict:
+    """Counts and breakdowns. `docs/v0.0/api/interface-v1.md` §4.2."""
+    return services_of(request).analytics.compute_analytics()
+
+
+@router.get("/agent-runs")
+def list_runs(
+    request: Request,
+    opportunity_id: Optional[str] = None,
+    client_message_id: Optional[str] = None,
+    limit: int = 50,
+) -> dict:
+    """List agent runs with optional filters. `docs/v0.0/api/interface-v1.md` §4.3."""
+    repo = services_of(request).repo
+    runs = repo.list_runs(
+        opportunity_id=opportunity_id,
+        client_message_id=client_message_id,
+        limit=limit,
+    )
+    return {"items": runs, "count": len(runs)}
+
+
+@router.get("/agent-runs/{run_id}")
+def get_run(run_id: str, request: Request) -> dict:
+    """One agent run in full. `docs/v0.0/api/interface-v1.md` §4.3."""
+    run = services_of(request).repo.get_run(run_id)
+    if run is None:
+        raise errors.not_found(f"Run {run_id} not found")
+    return run
+
+
+@router.post("/seed")
+def seed_demo_data(request: Request) -> dict:
+    """Seed the scripted demo conversations. Idempotent."""
+    return seed(services_of(request).conversation)

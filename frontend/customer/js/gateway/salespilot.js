@@ -1,120 +1,210 @@
 /**
- * SalesPilot FastAPI transport.
+ * SalesPilot backend transport — customer tier.
  *
- * Maps the customer tier of `docs/api/interface-v1.md` §5.1 onto the gateway
- * interface in index.js:
+ * Maps the three customer endpoints onto the gateway interface:
  *
- *   POST   /api/messages              -> send()
- *   GET    /api/conversations/{id}    -> loadHistory(), fetchSince(cursor)
- *   DELETE /api/conversations/{id}    -> reset()
- *   GET    /health                    -> health()
+ *   POST   /api/messages
+ *   GET    /api/conversations/{id}[?since=]
+ *   DELETE /api/conversations/{id}
  *
- * There is nothing to discard at this boundary any more. The backend's customer
- * schema has no field for `score`, `priority`, `signals`, `state`,
- * `next_best_action`, `case` or telemetry (requirement 3.4 is now enforced
- * server-side by payload shape), so this adapter maps what arrives rather than
- * filtering what must not. If a future response did carry one of those keys,
- * this adapter would still not forward it: it names every field it reads.
+ * **There is no sales intelligence to discard here any more.** The earlier design
+ * had this adapter strip `score`, `priority`, `signals`, `state`,
+ * `next_best_action` and `case` from the response, because the old backend sent
+ * them to whoever asked. The rebuilt backend enforces the boundary server-side
+ * with a typed projection that has no field for them
+ * (`docs/v0.0/api/interface-v1.md` §2), so the customer response cannot carry them.
+ * `assertNoIntelligence` below verifies that at runtime rather than trusting it:
+ * if a future change widens the surface, this logs loudly instead of quietly
+ * rendering internal data to a customer.
  *
- * Capabilities are detected, never assumed — an older backend simply reports
- * fewer of them and the UI disables those paths.
+ * Verified against a live `py -3 -m backend --serve --seed` on 2026-09-22.
  */
 import { createMessage } from '../store.js';
 
-/** Business-side `author` values the backend may send, mapped to store authors. */
-const AUTHOR = { ai: 'ai', human: 'human', system: 'system' };
+/** Keys that must never appear on a customer-tier payload. */
+const FORBIDDEN_KEYS = [
+  'score',
+  'priority',
+  'signals',
+  'signal_history',
+  'state',
+  'next_best_action',
+  'case',
+  'detection',
+  'retrieval',
+  'opportunity',
+  'agent_run',
+  'qualification',
+  'final_score',
+];
 
 /**
- * One wire message -> one store message.
+ * The tier boundary belongs to the backend, but a frontend that silently renders
+ * whatever arrives is no safeguard at all. This does not filter — filtering would
+ * hide a regression. It reports one.
+ */
+function assertNoIntelligence(payload) {
+  const leaked = FORBIDDEN_KEYS.filter((key) => key in payload);
+  if (leaked.length > 0) {
+    console.error(
+      '[customer-chat] the customer surface returned sales intelligence, which is ' +
+        'a backend tier-boundary regression. Keys: ' +
+        leaked.join(', ')
+    );
+  }
+  return payload;
+}
+
+/**
+ * A customer message is `role: "customer"`; anything from the business side is
+ * `role: "business"` — not `"agent"`, which is what an earlier draft of the
+ * interface assumed. `author` refines the business side into `ai` / `human` /
+ * `system` and is null on the customer's own messages.
+ */
+const directionOf = (message) => (message.role === 'customer' ? 'out' : 'in');
+const authorOf = (message) =>
+  message.role === 'customer' ? 'customer' : message.author ?? 'ai';
+
+/**
+ * Normalise one wire message into the store's internal shape.
  *
- * `direction` is viewer-relative and therefore internal to this app: the wire
- * says `role: "customer" | "business"` (interface §1.2) and the store says
- * out/in.
+ * Messages already stored server-side are, by definition, delivered: an outgoing
+ * one is marked `read` so a reloaded transcript does not show a stack of pending
+ * clocks. Incoming messages carry no tick state at all.
  */
 function toMessage(wire) {
-  const fromCustomer = wire.role === 'customer';
   return createMessage({
     id: wire.id ?? null,
     clientId: wire.client_message_id ?? undefined,
-    direction: fromCustomer ? 'out' : 'in',
-    author: fromCustomer ? 'customer' : (AUTHOR[wire.author] ?? 'ai'),
+    direction: directionOf(wire),
+    author: authorOf(wire),
     text: wire.text ?? '',
-    ts: wire.ts,
-    status: fromCustomer ? 'read' : null,
+    ts: wire.ts ?? Date.now(),
+    status: directionOf(wire) === 'out' ? 'read' : null,
+    repName: wire.rep_name ?? null,
   });
 }
 
-function toQuickReplies(wire) {
-  if (!Array.isArray(wire)) return [];
-  return wire
-    .filter((chip) => chip && typeof chip.id === 'string' && typeof chip.label === 'string')
-    .map((chip) => ({ id: chip.id, label: chip.label }));
+/** The representative's name, when a human wrote the most recent reply. */
+const repNameOf = (wire) => (wire && wire.author === 'human' ? wire.rep_name ?? null : null);
+
+/**
+ * Turn an error body into one line of text.
+ *
+ * `detail` is a string for the backend's own errors, but FastAPI's validation
+ * failures (422) send an array of objects. Passing that straight to `new Error`
+ * produced the literal string "[object Object]" — an error message that tells
+ * nobody anything.
+ */
+function describeError(payload, fallback) {
+  const detail = payload?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        const field = Array.isArray(entry?.loc) ? entry.loc.at(-1) : null;
+        return [field, entry?.msg].filter(Boolean).join(': ');
+      })
+      .filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+  return fallback;
 }
 
-export function createSalesPilotGateway(config = {}) {
-  const base = (config.apiBase ?? '').replace(/\/$/, '');
+export function createSalesPilotGateway(config) {
+  const base = (config.apiBase || '').replace(/\/$/, '');
   const url = (path) => `${base}${path}`;
-  const sendTimeoutMs = config.sendTimeoutMs ?? 30000;
 
   /**
-   * One fetch, with a timeout and an error carrying `.status` so the caller can
-   * tell a rejected request from an unreachable server (main.js reads it).
+   * One fetch with a timeout budget. Errors carry `.status` so the telemetry
+   * channel can report the real HTTP code rather than a guess.
    */
-  async function request(path, { method = 'GET', body, timeoutMs = 10000 } = {}) {
+  async function request(path, { method = 'GET', body, timeoutMs } = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response;
+    const budget = timeoutMs ?? config.sendTimeoutMs ?? 30000;
+    const timer = setTimeout(() => controller.abort(), budget);
+
     try {
-      response = await fetch(url(path), {
+      const response = await fetch(url(path), {
         method,
-        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
-    } catch (cause) {
-      const error = new Error(`SalesPilot transport: ${method} ${path} failed`);
-      error.status = 0;
-      error.cause = cause;
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const error = new Error(
+          describeError(payload, `${method} ${path} failed with ${response.status}`)
+        );
+        error.status = response.status;
+        throw error;
+      }
+      return { status: response.status, payload };
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        const timeout = new Error(`${method} ${path} timed out after ${budget}ms`);
+        timeout.status = 0;
+        throw timeout;
+      }
+      if (error.status === undefined) error.status = 0;
       throw error;
     } finally {
       clearTimeout(timer);
     }
-
-    if (!response.ok) {
-      const error = new Error(`SalesPilot transport: ${method} ${path} -> ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-    if (response.status === 204) return null;
-    return response.json();
   }
-
-  const conversation = (customerId) =>
-    `/api/conversations/${encodeURIComponent(customerId)}`;
 
   return {
     name: 'salespilot',
 
     async loadHistory(customerId) {
-      // A conversation that has not started yet is not an error: the backend
-      // has no opportunity for this id until the first message.
-      let payload;
       try {
-        payload = await request(conversation(customerId));
+        const { payload } = await request(
+          `/api/conversations/${encodeURIComponent(customerId)}`
+        );
+        assertNoIntelligence(payload);
+        const messages = (payload.messages ?? []).map(toMessage);
+        const latestHuman = messages.findLast((message) => message.author === 'human');
+        return {
+          messages,
+          quickReplies: payload.quick_replies ?? [],
+          question: payload.customer_question ?? null,
+          humanTakeover: Boolean(payload.human_takeover),
+          repName: latestHuman?.repName ?? null,
+          capabilities: {
+            idempotency: true,
+            quickReplies: true,
+            incrementalFetch: true,
+          },
+        };
       } catch (error) {
-        if (error.status === 404) return { messages: [], humanTakeover: false };
+        // A customer who has never written has no conversation yet. That is the
+        // ordinary first-run case, not a failure, so it must not surface as an
+        // error state over an empty chat.
+        if (error.status === 404) {
+          return {
+            messages: [],
+            quickReplies: [],
+            question: null,
+            humanTakeover: false,
+            repName: null,
+            capabilities: {
+              idempotency: true,
+              quickReplies: true,
+              incrementalFetch: true,
+            },
+          };
+        }
         throw error;
       }
-      return {
-        messages: (payload.messages ?? []).map(toMessage),
-        humanTakeover: Boolean(payload.human_takeover),
-      };
     },
 
     async send({ customerId, customerName, text, clientId }) {
-      const payload = await request('/api/messages', {
+      // The request model is `extra="forbid"`, so exactly these four keys.
+      const { status, payload } = await request('/api/messages', {
         method: 'POST',
-        timeoutMs: sendTimeoutMs,
         body: {
           customer_id: customerId,
           customer_name: customerName,
@@ -123,49 +213,67 @@ export function createSalesPilotGateway(config = {}) {
         },
       });
 
-      const reply = createMessage({
-        direction: 'in',
-        author: payload.generation === 'human' ? 'human' : 'ai',
-        text: payload.reply ?? '',
-      });
+      assertNoIntelligence(payload);
+
+      // `message` is the business-side reply. The customer's own message is
+      // already on screen optimistically, and the server echoes their key at the
+      // top level rather than on the reply.
+      const replyWire = payload.message;
+      const messages = replyWire
+        ? [toMessage(replyWire)]
+        : [
+            // Defensive: if a future build omits the message object, the reply
+            // text is still the thing the customer must see.
+            createMessage({
+              direction: 'in',
+              author: payload.human_takeover ? 'human' : 'ai',
+              text: payload.reply ?? '',
+            }),
+          ];
 
       return {
-        status: 200,
-        messages: [reply],
-        quickReplies: toQuickReplies(payload.quick_replies),
+        status,
+        messages,
+        quickReplies: payload.quick_replies ?? [],
+        question: payload.customer_question ?? null,
         humanTakeover: Boolean(payload.human_takeover),
+        repName: repNameOf(replyWire),
+        // Facts are returned for the product card in customer task 5. They are
+        // deliberately not turned into a card here: the backend's reply text
+        // already embeds them, so rendering both would duplicate the content.
+        facts: payload.facts ?? [],
         capabilities: {
-          // Detected from what actually came back, per the store's comment.
-          idempotency: payload.client_message_id === clientId,
-          quickReplies: Array.isArray(payload.quick_replies),
+          idempotency: true,
+          quickReplies: true,
           incrementalFetch: true,
         },
       };
     },
 
     async fetchSince(customerId, cursor) {
-      const path = cursor
-        ? `${conversation(customerId)}?since=${encodeURIComponent(cursor)}`
-        : conversation(customerId);
-      let payload;
-      try {
-        payload = await request(path);
-      } catch (error) {
-        // A cursor the backend rejects (400) must not wedge polling; fall back
-        // to no new messages and let the next poll re-cursor.
-        if (error.status === 404 || error.status === 400) return { messages: [] };
-        throw error;
-      }
-      return { messages: (payload.messages ?? []).map(toMessage) };
+      const query = cursor ? `?since=${encodeURIComponent(cursor)}` : '';
+      const { payload } = await request(
+        `/api/conversations/${encodeURIComponent(customerId)}${query}`
+      );
+      assertNoIntelligence(payload);
+      const messages = (payload.messages ?? []).map(toMessage);
+      const latestHuman = messages.findLast((message) => message.author === 'human');
+      return {
+        messages,
+        humanTakeover: Boolean(payload.human_takeover),
+        repName: latestHuman?.repName ?? null,
+      };
     },
 
     async reset(customerId) {
-      await request(conversation(customerId), { method: 'DELETE' });
+      await request(`/api/conversations/${encodeURIComponent(customerId)}`, {
+        method: 'DELETE',
+      });
     },
 
     async health() {
       try {
-        const payload = await request('/health', { timeoutMs: 5000 });
+        const { payload } = await request('/health', { timeoutMs: 5000 });
         return payload?.status === 'ok';
       } catch {
         return false;

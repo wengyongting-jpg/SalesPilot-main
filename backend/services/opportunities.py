@@ -14,7 +14,7 @@ from ..domain.detection import Detection
 from ..domain.enums import Qualification
 from ..domain.message import Message
 from ..domain.opportunity import Opportunity
-from ..kernel import next_best_action, scoring
+from ..kernel import next_best_action
 from ..kernel.next_best_action import NextBestAction
 from ..storage.base import Repository
 from . import InvalidCursor, OpportunityNotFound
@@ -35,11 +35,6 @@ def reset(repo: Repository, opportunity_id: str) -> bool:
 def current_next_best_action(opp: Opportunity) -> NextBestAction:
     """What a representative should do now, from the stored profile alone."""
     return next_best_action.recommend(opp, Detection(), escalated=opp.human_takeover)
-
-
-def score_explanation(opp: Opportunity) -> dict:
-    """The audit trail behind the opportunity's current score and priority."""
-    return scoring.explain(opp)
 
 
 def held(repo: Repository) -> list[Opportunity]:

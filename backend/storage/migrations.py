@@ -16,6 +16,17 @@ _SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _SCHEMA_PATH.read_text(encoding="utf-8")),
+    (2, """
+        CREATE INDEX IF NOT EXISTS idx_messages_opportunity_seq
+            ON messages(opportunity_id, seq DESC);
+        CREATE TABLE IF NOT EXISTS conversation_memory (
+            opportunity_id TEXT PRIMARY KEY,
+            version INTEGER NOT NULL DEFAULT 1,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+        );
+    """),
 ]
 
 

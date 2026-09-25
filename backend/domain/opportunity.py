@@ -5,7 +5,7 @@ Holds where the customer is in the buying journey, what has been observed, how
 valuable the opportunity looks, and the full transcript. Every business decision
 about it is made in `backend.kernel`; this module only holds the state.
 
-On counting, see `docs/api/interface-v1.md` §1.1. The field is
+On counting, see `docs/v0.0/api/interface-v1.md` §1.1. The field is
 `customer_message_count`, because that is what it counts. `turns` survives as a
 read-only alias so the wire contract is unbroken, but it cannot be assigned, which
 means no code inside the backend can use the misleading name to mutate state.
@@ -122,6 +122,7 @@ class ScoreHistoryEntry:
     score: int
     state: str
     trigger: str
+    evidence: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -165,6 +166,12 @@ class Opportunity:
     # Human-in-the-loop.
     human_takeover: bool = False
     human_intervention_required: bool = False
+    # A proposed handoff is not a case. It becomes one only after the customer
+    # explicitly confirms, including when the trigger came from a model tool.
+    pending_handoff_reason: Optional[str] = None
+    pending_question_field: Optional[str] = None
+    collected_answers: dict[str, str] = field(default_factory=dict)
+    evidence_sources: dict[str, str] = field(default_factory=dict)
 
     # Qualification gate. The machine may only ever raise this to HELD; only a
     # human sets DISQUALIFIED.

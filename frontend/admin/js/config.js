@@ -21,14 +21,26 @@ export const config = {
   /**
    * Transport adapter: 'mock' | 'salespilot'.
    *
-   * Defaults to 'mock'. The backend is mid-refactor and the visibility-tier split
-   * in docs/api/interface-v1.md §5.1 will move admin reads to /api/admin/*, so
-   * binding to today's paths would be rework. See design.md § Transport.
+   * Defaults to 'salespilot' so the console shows the backend's real queue,
+   * transcript and agent telemetry. Select the mock explicitly for fixture-only
+   * development.
+   *
+   * Browser integration used to be blocked by the absence of CORS headers
+   * (`docs/v0.0/backend/backend-contract.md` item 15, formerly numbered 13). That shipped on
+   * 2026-09-22: the API now echoes `Access-Control-Allow-Origin` for configured
+   * loopback origins, so serving this console from 8123 against the API on 8000
+   * works in a browser. The origin must appear in the backend's
+   * `SALESPILOT_CORS_ORIGINS`.
    */
   transport: 'salespilot',
 
-  /** Empty string means same-origin. */
-  apiBase: 'http://127.0.0.1:8010',
+  /**
+   * Base URL for the backend REST API, used by the 'salespilot' transport.
+   *
+   * Not empty, because same-origin can never be right here: the backend serves no
+   * static files, so the console is always on a different origin than the API.
+   */
+  apiBase: 'http://127.0.0.1:8000',
 
   /** Relative path to the customer app, embedded by the harness route. */
   customerAppPath: '../customer/index.html',

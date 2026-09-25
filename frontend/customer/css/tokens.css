@@ -1,6 +1,6 @@
 /* =============================================================================
    Design tokens — customer chat
-   Values are specified in .kiro/specs/customer-chat-ui/ux-spec.md sections 1-6.
+   Values are specified in docs/v0.0/frontend/customer-chat-ui/ux-spec.md sections 1-6.
    This file contains tokens ONLY. Component rules belong in app.css.
    ========================================================================== */
 
@@ -21,6 +21,7 @@
   --c-backdrop: #d3d9de;
   --c-header: #008069;
   --c-header-text: #ffffff;
+  --c-header-hover: rgb(255 255 255 / 0.15);
   --c-chat-bg: #efeae2;
   --c-composer-bg: #f0f2f5;
   --c-input-bg: #ffffff;
@@ -29,13 +30,21 @@
   --c-bubble-out: #d9fdd3;
   --c-bubble-in: #ffffff;
   --c-bubble-text: #111b21;
-  --c-bubble-meta: #667781;
+  /* Darkened from #667781, which measured 4.19:1 against the outgoing bubble —
+     below the 4.5:1 AA threshold for 12px metadata. Now 5.30:1 there and
+     5.87:1 on white. */
+  --c-bubble-meta: #5c6b75;
   --c-bubble-shadow: 0 1px 0.5px rgb(11 20 26 / 0.13);
 
   /* ---- Accent and status -------------------------------------------- */
   --c-accent: #008069;
   --c-tick-read: #53bdeb;
-  --c-danger: #d32f2f;
+  /* Darkened from #d32f2f (4.16:1 on the chat background) to clear AA for the
+     retry control's 12px label. */
+  --c-danger: #c22121;
+  --c-danger-hover: rgb(194 33 33 / 0.08);
+  --c-focus-ring: rgb(0 128 105 / 0.25);
+  --c-elevation-soft: rgb(11 20 26 / 0.15);
   --c-warning-bg: #fff3cd;
   --c-warning-text: #664d03;
   --c-handoff-bg: #e7f3ff;

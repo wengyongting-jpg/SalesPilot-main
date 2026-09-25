@@ -1,8 +1,8 @@
 /**
  * Banner stack: offline above handoff, both able to show at once (ux-spec §5).
  *
- * The offline banner is driven by `navigator.onLine` in this slice. Health-check
- * polling, which needs a backend, arrives with the SalesPilot adapter in task 5.
+ * The offline banner is driven by browser connectivity and periodic backend
+ * health checks. Human handoff may be visible at the same time.
  */
 import { strings } from '../strings.js';
 import { icons } from '../icons.js';

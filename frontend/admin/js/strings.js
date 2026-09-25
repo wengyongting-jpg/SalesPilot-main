@@ -4,7 +4,7 @@
  * English only. Also holds the presentation label maps for backend enums, so a
  * view never embeds a backend value as display copy.
  *
- * Vocabulary note: this file never says "turns". Per docs/api/interface-v1.md
+ * Vocabulary note: this file never says "turns". Per docs/v0.0/api/interface-v1.md
  * §1.1 the customer-message counter is named explicitly, because "turns" is read
  * as agent turns and is not.
  */
@@ -18,6 +18,7 @@ export const strings = {
     subtitle: 'Sales Console',
     inbox: 'Inbox',
     cases: 'Cases',
+    debug: 'Diagnostics',
     harness: 'Test Harness',
     openCases: (n) => `${n} open case${n === 1 ? '' : 's'}`,
     operatorLabel: 'Signed in as',
@@ -37,12 +38,13 @@ export const strings = {
     takeoverMarker: 'Human handling',
     selectTitle: 'Select a conversation',
     selectBody:
-      'Choose a customer on the left to see their conversation, assessment and ' +
+      'Choose a conversation to see its assessment and ' +
       'agent activity.',
     conversationFailed: 'Could not load this conversation.',
   },
 
   conversation: {
+    transcriptLabel: 'Conversation transcript',
     messageCountLabel: 'customer messages',
     transcriptEmpty: 'No messages in this conversation yet.',
     openCase: 'View case',
@@ -64,9 +66,18 @@ export const strings = {
     needsTakeover:
       'Take over the case before replying. While the AI owns the conversation it ' +
       'answers on its own.',
+    // Item 14 in docs/v0.0/backend/backend-contract.md: PATCH /cases/{id} -> Taken Over does
+    // not set human_takeover on the opportunity, so a reply would be rejected
+    // with 409. Say so instead of offering a composer that cannot send.
+    takeoverNotApplied:
+      'This case reads Taken Over, but the backend still reports the assistant as ' +
+      'handling the conversation, so a reply would be rejected. Tracked as item 14 ' +
+      'in docs/v0.0/backend/backend-contract.md.',
+    // The backend's write path shipped (contract item 4), so this is now about the
+    // selected transport rather than about a missing endpoint.
     unsupported:
-      'The backend does not provide a write path for a human reply yet, so this ' +
-      'composer is disabled. Tracked as item 4 in docs/backend-contract.md.',
+      'The selected transport cannot send a human reply, so this composer is ' +
+      'disabled. Switch to a transport that supports it.',
     failed: 'Reply not sent. Your draft has been kept.',
     noConversation: 'Select a conversation to reply.',
   },
@@ -74,6 +85,7 @@ export const strings = {
   panels: {
     intelligence: 'Assessment',
     observability: 'Agent Activity',
+    tablistLabel: 'Conversation detail panels',
   },
 
   intelligence: {
@@ -94,6 +106,12 @@ export const strings = {
       'only the total is available here.',
     scoreHistoryTitle: 'Score history',
     stateHistoryTitle: 'State history',
+    // Column headers — these are tabular data and render as real tables so a
+    // screen reader can associate each cell with its column.
+    scoreHistoryColumns: ['Time', 'Score', 'State', 'Trigger'],
+    scoreHistoryCaption: 'Opportunity score over time',
+    stateHistoryColumns: ['Time', 'From', 'To', 'Reason'],
+    stateHistoryCaption: 'Journey state transitions over time',
     nbaTitle: 'Next best action',
     nbaReasonLabel: 'Reason',
     nbaHumanLabel: 'Human intervention',
@@ -115,11 +133,15 @@ export const strings = {
     runsFailed: 'Could not load agent activity.',
     // Requirement 4.10: absent telemetry is labelled, never shown as zero.
     notReported: 'not reported',
+    // interface-v1.md §5.3 requirement 7: the backend sends amount 0.0 with
+    // pricing_known false for a model it has no price for. That is "no idea",
+    // not "free", and must not render as a number.
+    priceUnknown: 'price unknown',
     unavailableTitle: 'Telemetry not available',
     unavailableBody:
       'This transport does not report agent telemetry. Client-observed duration ' +
       'and status are shown where available; model, token, cost and step detail ' +
-      'are not reported. Tracked as item 8 in docs/backend-contract.md.',
+      'are not reported. Tracked as item 8 in docs/v0.0/backend/backend-contract.md.',
     totalTokens: 'Total tokens',
     totalCost: 'Total cost',
     runCount: 'Agent runs',
@@ -131,6 +153,8 @@ export const strings = {
       'Tool calls count only calls the model chose to make. Knowledge retrieval ' +
       'is a fixed pipeline step and is not counted here.',
     stepsTitle: 'Steps',
+    stepsColumns: ['#', 'Step', 'Kind', 'Duration'],
+    stepsCaption: 'Pipeline steps executed in this agent run',
     callsTitle: 'Model calls',
     selectRun: 'Select a run to see its steps and model calls.',
     triggerLabel: 'Trigger',
@@ -144,6 +168,9 @@ export const strings = {
       'Content is not exposed by the backend. Length is shown above.',
     degradedAt: (step) => `Degraded at: ${step}`,
     clientObserved: 'Client-observed',
+    violations: (n) =>
+      `${n} model contract violation${n === 1 ? '' : 's'}: the model proposed a ` +
+      'value the domain refused. Recorded rather than silently downgraded.',
   },
 
   stepKind: {
@@ -205,7 +232,7 @@ export const strings = {
     injectNote:
       'Delivers the message straight into the device so you can see how a human ' +
       'reply looks to the customer. This is not the same as the Inbox composer: ' +
-      'that one goes through the backend write path, which does not exist yet.',
+      'that one persists through the backend and is delivered by takeover polling.',
     repNameLabel: 'Representative name',
     statusTitle: 'Live status',
     connection: 'Connection',
@@ -275,33 +302,53 @@ export const strings = {
     'Human Request': 'Human Req',
   },
 
-  scoreDimension: {
-    purchase_intent: 'Purchase intent',
-    purchase_readiness: 'Purchase readiness',
-    product_potential: 'Product potential',
-    expansion: 'Expansion',
-    engagement: 'Engagement & urgency',
+  /**
+   * The two-axis score. Fit is "how valuable would this customer be", behaviour
+   * is "how are they acting right now" — kept apart on purpose, because a single
+   * blended number cannot be taken apart by a reviewer.
+   */
+  score: {
+    fitTitle: 'Fit',
+    behaviourTitle: 'Behaviour',
+    fitTotal: 'Fit total',
+    behaviourTotal: 'Behaviour total',
+    behaviourRaw: 'Raw',
+    headline: 'Headline',
+    // Stated so nobody ranks by this number; the backend calls it display-only.
+    headlineNote:
+      'Display only. Ranking uses priority, which the backend derives from the ' +
+      'fit and behaviour axes together rather than from this number.',
+    recencyNote: (percent) => `Recency multiplier ${percent}%`,
+    fit: {
+      need_identified: 'Need identified',
+      product_potential: 'Product potential',
+      expansion: 'Expansion',
+    },
+    behaviour: {
+      purchase_intent: 'Purchase intent',
+      purchase_readiness: 'Purchase readiness',
+      engagement: 'Engagement',
+    },
+    engagementDepth: 'Depth',
+    engagementUrgency: 'Urgency',
+    engagementRecency: 'Recency',
   },
-};
 
-/** Maximum for each score dimension, per the 100-point model. */
-/**
- * Per-dimension maxima, as the backend scores them.
- *
- * These were the frozen build's single-axis weights (30/20/20/15/15 = 100).
- * The rebuild scores fit and behaviour as separate axes (gap register item
- * 13), so the caps changed — see `backend/domain/opportunity.py`'s ScoreCard.
- * With the old numbers a real payload rendered "product potential 30 / 20",
- * i.e. a bar past its own maximum.
- *
- * Fit: need_identified 40, product_potential 40, expansion 20.
- * Behaviour: purchase_intent 40, purchase_readiness 30, engagement 30.
- * `need_identified` has no row here yet, so the fit axis is shown only in part.
- */
-export const SCORE_DIMENSION_MAX = {
-  purchase_intent: 40,
-  purchase_readiness: 30,
-  product_potential: 40,
-  expansion: 20,
-  engagement: 30,
+  qualification: {
+    label: 'Qualification',
+    qualified: 'Qualified',
+    held: 'Held',
+    disqualified: 'Disqualified',
+    reasonLabel: 'Reason',
+    heldNote: 'Held opportunities are excluded from the sales queue.',
+  },
+
+  generation: {
+    label: 'Wording',
+    llm: 'Model',
+    template: 'Template',
+    human: 'Representative',
+    // The compliance point: a template reply involved no model at all.
+    templateNote: 'Composed from a template; no model produced the wording.',
+  },
 };

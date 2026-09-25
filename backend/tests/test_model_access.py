@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P7: model access — the same conversation, with and without a model.
 
-Acceptance from `docs/backend-plan.md` §9 P7:
+Acceptance from `docs/v0.0/backend/backend-plan.md` §9 P7:
 
     1. With no key configured, a full conversation completes, every business
        message reports `generation: "template"`, and each run reports
@@ -25,7 +25,7 @@ from backend.agent.reply import build_composer
 from backend.domain.enums import Generation
 from backend.providers.probe import probe
 from backend.services.conversation import ConversationService
-from backend.storage import MemoryRepository
+from backend.storage import InMemoryRepository
 
 CONVERSATION = [
     "Hi! I'm looking for health insurance with private hospital coverage.",
@@ -36,7 +36,7 @@ CONVERSATION = [
 
 def _service(extraction_model=None, reply_model=None) -> ConversationService:
     return ConversationService(
-        MemoryRepository(),
+        InMemoryRepository(),
         extractor=build_extractor(extraction_model),
         composer=build_composer(reply_model),
     )
@@ -79,9 +79,9 @@ class TestOfflinePath(_Quiet):
     def test_the_probe_reports_offline_rather_than_failing(self):
         config.LLM_PROVIDER = "offline"
         result = probe()
-        self.assertEqual(result["provider"], "offline")
-        self.assertIsNone(result["reachable"])
-        self.assertIn("offline", result["detail"])
+        self.assertEqual(result.provider, "offline")
+        self.assertIsNone(result.reachable)
+        self.assertIn("offline", result.detail)
 
 
 class TestModelBackedPath(_Quiet):

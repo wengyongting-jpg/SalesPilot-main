@@ -11,7 +11,7 @@
  */
 import { strings } from '../strings.js';
 import { el, clear, badge, stateBlock, skeleton, kvRow } from '../dom.js';
-import { dateTime } from '../format.js';
+import { dateTime, priorityClass } from '../format.js';
 
 const STATUS_CLASS = {
   OPEN: 'badge--high',
@@ -29,7 +29,7 @@ const STATUS_CLASS = {
 export function createCases({ el: root, onTransition, onRefresh, onOpenConversation }) {
   let lastSignature = null;
 
-  const card = (item, transition) => {
+  const card = (item, transition, expanded) => {
     const inFlight = transition.inFlight && transition.caseId === item.id;
     const failed = Boolean(transition.error) && transition.caseId === item.id;
 
@@ -71,25 +71,26 @@ export function createCases({ el: root, onTransition, onRefresh, onOpenConversat
 
     return el('div', { className: 'case' }, [
       el('div', { className: 'case__head' }, [
-        el('span', { className: 'case__id', text: item.id }),
+        el('strong', { text: item.customerName }),
+        badge(item.priority ?? '—', priorityClass(item.priority)),
+        el('span', { text: `Score ${item.score ?? '—'}` }),
         badge(item.status, STATUS_CLASS[item.statusToken] ?? 'badge--neutral'),
       ]),
-      el('div', { className: 'kv' }, [
-        ...kvRow(
-          strings.cases.customerLabel,
-          `${item.customerName} · ${item.opportunityId}`
-        ),
-        ...kvRow(strings.cases.stateLabel, item.state),
-        ...kvRow(
-          strings.cases.productLabel,
-          strings.product[item.product] ?? item.product
-        ),
-        ...kvRow(strings.cases.reasonLabel, item.reason),
-        ...kvRow(strings.cases.recommendedLabel, item.recommendedAction),
-        ...kvRow(strings.cases.summaryLabel, item.summary),
-        ...kvRow(strings.cases.createdLabel, dateTime(item.createdAt)),
-      ]),
+      el('p', { className: 'case__reason', text: item.reason }),
+      el('p', { className: 'case__keywords', text: item.keywords?.slice(0, 5).join(' · ') || 'No keywords yet' }),
+      el('p', { text: item.recommendedAction }),
       el('div', { className: 'case__actions' }, actions),
+      el('details', { attrs: { 'data-case-id': item.id, open: expanded.has(item.id) } }, [
+        el('summary', { text: 'More case details' }),
+        el('div', { className: 'kv' }, [
+          ...kvRow(strings.cases.customerLabel, `${item.customerName} · ${item.opportunityId}`),
+          ...kvRow(strings.cases.stateLabel, item.state),
+          ...kvRow(strings.cases.productLabel, strings.product[item.product] ?? item.product),
+          ...kvRow(strings.cases.summaryLabel, item.summary),
+          ...kvRow(strings.cases.createdLabel, dateTime(item.createdAt)),
+          ...kvRow('Case ID', item.id),
+        ]),
+      ]),
       failed
         ? el('div', { className: 'case__error', text: strings.cases.transitionFailed })
         : null,
@@ -101,10 +102,15 @@ export function createCases({ el: root, onTransition, onRefresh, onOpenConversat
       const { status, items } = state.cases;
       const transition = state.transition;
       const signature = `${status}|${items
-        .map((c) => `${c.id}:${c.statusToken}`)
+        .map((c) => `${c.id}:${c.statusToken}:${c.priority}:${c.score}:${c.reason}:${c.summary}:${c.keywords?.join('/')}`)
         .join(',')}|${transition.caseId}|${transition.inFlight}|${Boolean(transition.error)}`;
       if (signature === lastSignature) return;
       lastSignature = signature;
+
+      const expanded = new Set(
+        [...root.querySelectorAll('details[open][data-case-id]')]
+          .map((node) => node.getAttribute('data-case-id'))
+      );
 
       clear(root);
 
@@ -160,11 +166,16 @@ export function createCases({ el: root, onTransition, onRefresh, onOpenConversat
 
       const ordered = [...items].sort((a, b) => {
         const rank = { OPEN: 0, TAKEN_OVER: 1, CLOSED: 2 };
-        return (rank[a.statusToken] ?? 3) - (rank[b.statusToken] ?? 3);
+        const statusOrder = (rank[a.statusToken] ?? 3) - (rank[b.statusToken] ?? 3);
+        if (statusOrder) return statusOrder;
+        const priorityRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        const priorityOrder = (priorityRank[a.priority] ?? 3) - (priorityRank[b.priority] ?? 3);
+        if (priorityOrder) return priorityOrder;
+        return (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0);
       });
 
       root.append(
-        el('div', { className: 'case-grid' }, ordered.map((item) => card(item, transition)))
+        el('div', { className: 'case-grid' }, ordered.map((item) => card(item, transition, expanded)))
       );
     },
   };

@@ -9,8 +9,10 @@ commit, and what language to write in. It does not describe what to build — fo
 that, see the document map in §3.
 
 **Precedence.** Where this document conflicts with any other instruction in the
-repository, this document wins. Where it is silent, follow the steering files and
-specs. If a user instruction in the current session conflicts with a rule here,
+repository, this document wins. Where it is silent, follow the current READMEs
+and approved `docs/v1.0/` documents. The `docs/v0.0/` archive records earlier
+decisions but is not an active instruction source. If a user instruction in the
+current session conflicts with a rule here,
 the user's instruction wins for that session only — it does not amend this file
 (see Rule 7).
 
@@ -63,7 +65,7 @@ existing docs, README rewrites, and changelog entries. Code comments that explai
 the code you are writing are part of the code, not documentation, and are
 expected.
 
-`docs/frontend-changelog.md` is a specific, already-established instance of this
+`docs/v0.0/frontend/frontend-changelog.md` is a specific, already-established instance of this
 rule: it is updated **only** on explicit authorisation, and completing a change is
 not authorisation.
 
@@ -98,17 +100,18 @@ instead of writing a test file to close it.
 
 1. **Self-review.** Re-read your own diff as if reviewing someone else's. Check it
    against the specs and steering rules that apply to the files you touched.
-2. **Run existing checks.** For backend changes, the suite must stay green:
+2. **Run existing checks.** For backend changes, run the relevant suite:
 
    ```powershell
-   py -3 -m pytest tests/ -v
-   # stdlib-only equivalent
-   py -3 -m unittest discover -s tests -v
+   $env:SALESPILOT_LLM = 'offline'
+   py -3 -m unittest discover -s backend/tests
    ```
 
-   For frontend changes, verification is manual and scripted by design; use the
-   `_Verify:_` steps in the relevant `tasks.md`. Do not introduce a JavaScript test
-   runner, because that would introduce a build step.
+   For frontend changes, run the existing Node built-in test suite with
+   `node --test "frontend/tests/**/*.test.js"`, then manually verify changed views
+   in a browser. This runner is already part of the repository and requires no
+   dependency or build step. Historical `_Verify:_` steps are archived under
+   `docs/v0.0/frontend/` and may be used as supplementary checks.
 3. **Report, do not patch, coverage gaps.** If you identify behaviour that is
    risky and untested, describe the gap, why it is risky, and what a test would
    assert. Then stop and wait. Rule 2 still applies.
@@ -152,18 +155,13 @@ new files.
 
 | Document | Purpose |
 | --- | --- |
-| `AGENTS.md` (this file) | How to work. Binding on every agent. |
-| `.kiro/steering/product.md` | Product context, the two audiences, non-goals, compliance red lines. |
-| `.kiro/steering/tech.md` | Stack, repository layout, and the backend read-only rule for frontend work. |
-| `.kiro/steering/frontend-conventions.md` | Frontend coding rules and design-token discipline. Applies to `frontend/**`. |
-| `docs/backend-handoff.md` | Track ownership, priorities, and the contracts that must not change. Start here if you own the backend. |
-| `docs/api/interface-v1.md` | Authoritative request/response contract. Shared; editable while draft. |
-| `docs/backend-plan.md` | Backend rebuild plan. Backend-owned; frontend read-only. |
-| `docs/backend-contract.md` | Current REST API reference plus the specification of every requested backend change. |
-| `docs/backend-changelog.md` | Gated changelog for the Python backend. Authorisation required. |
-| `docs/frontend-changelog.md` | Gated changelog. Authorisation required. |
-| `.kiro/specs/customer-chat-ui/` | Customer chat: requirements, design, UX spec, tasks, demo checklist. |
-| `.kiro/specs/admin-console-ui/` | Admin console: requirements, design, tasks. |
+| `AGENTS.md` (this file) | Binding working protocol. |
+| `README.md`, `backend/README.md`, `frontend/README.md` | Current setup, product boundaries, implementation, and operating instructions. |
+| `backend/evals/README.md` | Current multi-turn evaluation instructions. |
+| `docs/README.md` | Documentation entry point and version map. |
+| `docs/v1.0/` | Current proposals and approved work; each file states its own implementation status. |
+| `docs/v0.0/` | Historical contracts, Kiro-era specs, plans, and changelogs. These are references, not active implementation instructions. |
+| `docs/v0.0/api/interface-v1.md` | Frozen historical v1 wire contract. Preserve API semantics; later changes belong in a versioned delta. |
 
 ## 4. Standing project constraints
 
@@ -180,19 +178,18 @@ full in the document named.
   rule is the part that was never about parallelism: **say which track you are
   touching and why before you touch it**, and keep a change that crosses a
   track boundary in its own reviewable step rather than smuggled into another.
-- **`docs/api/interface-v1.md` is frozen** (2026-09-22). No edit is permitted.
-  A contract change means creating `interface-v2.md` and pointing it back at
-  v1. `docs/backend-contract.md` remains the gap register.
-- **The legacy console `salespilot/static/` is frozen.** Neither track extends,
-  migrates, or refactors it.
+- **`docs/v0.0/api/interface-v1.md` is frozen** (2026-09-22). Its relocation and
+  link corrections were explicitly authorised; its API semantics and fields
+  remain frozen. Contract changes require a new versioned contract, not an edit
+  to v1. The archived `docs/v0.0/backend/backend-contract.md` is historical.
 - **No frontend build step and no dependencies.** Vanilla HTML, CSS and ES
-  modules. No npm, no bundler, no CDN. See `.kiro/steering/tech.md`.
+  modules. No npm, no bundler, no CDN. See `frontend/README.md`.
 - **The frontend holds no business logic.** State, signals, score, priority, next
   best action and escalation come from the backend and are displayed, never
-  recomputed. See `.kiro/steering/frontend-conventions.md`.
+  recomputed. See `frontend/README.md`.
 - **Compliance red lines.** The assistant is labelled as AI; premium disclaimers
   are never hidden or truncated; no WhatsApp trademarks, fonts, or sounds. See
-  `.kiro/steering/product.md`.
+  `README.md` and `frontend/README.md`.
 - **No authentication exists anywhere in this project.** It is an accepted,
   documented demo limitation. Do not silently "fix" it, and do not add a fake
   login to disguise it.
@@ -205,4 +202,5 @@ full in the document named.
 - Confirm you stayed inside your track's file ownership, for example with
   `git status --short`.
 - Confirm you added no tests (Rule 2) or docs (Rule 3) without consent, performed
-  no git upload (Rule 4), and left this file untouched (Rule 7).
+  no git upload (Rule 4), and changed this file only with explicit authorisation
+  (Rule 7).

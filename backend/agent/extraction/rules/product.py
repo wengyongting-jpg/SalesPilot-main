@@ -1,83 +1,91 @@
 # -*- coding: utf-8 -*-
-"""Product classifier — which CareSure product the customer means.
+"""Product classification by keyword, carried forward through context.
 
-Keyword matching with conversation-history fallback: if the current message
-names no product, the classifier carries the most recently mentioned product
-forward. Ported from `salespilot/detection/product.py`, retargeted to
-`backend.domain.enums.Product`.
+Product is sticky on purpose: once a conversation is about Plus, "how much is it?"
+is still about Plus. Re-deciding from each message in isolation is what makes an
+assistant ask which plan you meant three times in a row.
 """
 from __future__ import annotations
 
-import re
-from typing import Optional
-
 from ....domain.enums import Product
-from ....domain.message import Message
 
-_PRODUCT_PHRASES: list[tuple[Product, tuple[str, ...]]] = [
+# Ordered so that the more specific segment wins: a message mentioning both
+# employees and a family is a corporate enquiry.
+_KEYWORDS: list[tuple[Product, tuple[str, ...]]] = [
     (Product.CORPORATE, (
-        "corporate", "employee", "employees", "staff", "sme", "company",
-        "business", "workforce", "employer", "group",
-    )),
-    (Product.FAMILY, (
-        "family plan", "family package", "family cover", "family coverage",
-        "family of", "for my family", "family needs", "family insurance",
+        "corporate", "employee", "employees", "staff", "company", "companies",
+        "sme", "business", "workforce", "employer", "group insurance", "team",
     )),
     (Product.PLUS, (
-        # Deliberately no bare "private hospital"/"private healthcare": they
-        # are coverage-tier descriptors a customer can use while stating a
-        # family or corporate need ("private hospital cover for me and my
-        # two children" is a family need, not a Plus-specific request), so
-        # they must not outrank an explicit family/corporate reference.
-        "caresure plus", "plus plan", "the plus plan",
-        "enhanced plan", "premium plan", "higher coverage",
+        # Deliberately no bare "private hospital": it is a coverage-tier
+        # descriptor a customer can use while stating a family or corporate
+        # need ("private hospital cover for me and my two children" is a
+        # family need, not a Plus-specific request), so it must not outrank
+        # an explicit family/corporate member reference checked below.
+        "plus", "private ward", "premium plan", "top tier",
+        "comprehensive", "best coverage", "a ward", "specialist of my choice",
+    )),
+    (Product.FAMILY, (
+        "family", "spouse", "wife", "husband", "child", "children", "kids",
+        "daughter", "son", "dependant", "dependent", "newborn", "household",
     )),
     (Product.ESSENTIAL, (
-        "essential", "basic plan", "cheapest", "entry plan", "affordable plan",
-        "b1", "first plan",
+        "essential", "basic", "entry", "affordable", "cheapest", "cheap",
+        "b1", "young professional", "first insurance", "starter", "budget",
     )),
 ]
 
-_PRODUCT_KEYWORDS = {
-    "plus": Product.PLUS,
-    "essential": Product.ESSENTIAL,
-    "family": Product.FAMILY,
-    "corporate": Product.CORPORATE,
-}
+_EMPLOYEE_COUNT_HINTS = ("employees", "headcount", "staff of")
 
 
-def detect(text: str, context: Optional[list[Message]] = None) -> Product:
-    """Classify which CareSure product the customer means, or carry it forward."""
-    normalized = text.lower()
-    for product, phrases in _PRODUCT_PHRASES:
-        if any(phrase in normalized for phrase in phrases):
+def detect(text: str, context: list | None = None) -> Product:
+    lowered = f" {text.lower().strip()} "
+
+    for product, keywords in _KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
             return product
 
-    tokens = set(re.findall(r"[a-z]+", normalized))
-    for keyword, product in _PRODUCT_KEYWORDS.items():
-        if keyword in tokens:
-            return product
+    # "We have 120 people" — a number next to a workforce word is corporate.
+    if any(hint in lowered for hint in _EMPLOYEE_COUNT_HINTS):
+        return Product.CORPORATE
 
+    # Nothing in this message: inherit from what the CUSTOMER said earlier.
+    #
+    # Only their messages. The assistant's own replies are not evidence of what the
+    # customer wants, and its overview reply names all four plans — so scanning them
+    # inherits whichever plan the keyword tables happen to check first. That was a
+    # real defect: a customer who asked for the cheapest basic plan and then said
+    # "that seems a little expensive for me" inherited *Corporate* from the
+    # assistant's own text, quadrupling his product potential and pushing a hesitant
+    # budget shopper to HIGH priority.
     if context:
-        return _infer_from_context(context)
+        for message in reversed(context):
+            if not _is_from_customer(message):
+                continue
+            inherited = _from_text(message.text)
+            if inherited is not Product.UNKNOWN:
+                return inherited
 
     return Product.UNKNOWN
 
 
-def _infer_from_context(context: list[Message]) -> Product:
-    """Carry forward the product the *customer* was most recently discussing.
+def _is_from_customer(message) -> bool:
+    """Whether a context entry came from the customer.
 
-    Scans only customer messages, never the assistant's own prior replies: a
-    greeting, an overview or a comparison routinely names every product in
-    one message, so scanning it for "the" product mentioned just returns
-    whichever keyword happens to be checked first — regardless of what the
-    customer actually meant, or whether they'd named a product at all.
+    Tolerant of a plain object with a `role` string as well as a domain `Message`, so
+    a caller assembling context by hand cannot silently opt out of the check.
     """
-    for msg in reversed(context):
-        if not msg.is_from_customer:
-            continue
-        text = msg.text.lower()
-        for keyword, product in _PRODUCT_KEYWORDS.items():
-            if keyword in text:
-                return product
+    flag = getattr(message, "is_from_customer", None)
+    if isinstance(flag, bool):
+        return flag
+    role = getattr(message, "role", None)
+    value = getattr(role, "value", role)
+    return value == "customer"
+
+
+def _from_text(text: str) -> Product:
+    lowered = f" {text.lower().strip()} "
+    for product, keywords in _KEYWORDS:
+        if any(keyword in lowered for keyword in keywords):
+            return product
     return Product.UNKNOWN

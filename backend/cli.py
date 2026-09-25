@@ -2,7 +2,7 @@
 """Command-line entry point.
 
 Subcommands arrive with the phases that implement them (see
-`docs/backend-plan.md` §9). `--probe` is useful from P0 onward because knowing
+`docs/v0.0/backend/backend-plan.md` §9). `--probe` is useful from P0 onward because knowing
 what model access is actually configured is the first thing to establish.
 """
 from __future__ import annotations
@@ -89,9 +89,9 @@ def _print_probe() -> None:
     from .providers.probe import probe
 
     result = probe()
-    reachable = result["reachable"]
+    reachable = result.reachable
     status = "n/a" if reachable is None else ("yes" if reachable else "no")
-    print(f"  model reachability   {status} — {result['detail']}")
+    print(f"  model reachability   {status} — {result.detail}")
     verdict = (
         "offline — rule-based extraction and template replies; every run reports degraded"
         if reachable is not True
@@ -122,7 +122,7 @@ def _run_serve(host: str, port: int, db_path: str | None, *, seed_first: bool) -
             f"\nseeded {outcome['messages_seeded']} messages" if outcome["seeded"]
             else f"\nnot seeded: {outcome['reason']}"
         )
-    app = create_app(repo, service)
+    app = create_app(repo, conversation=service)
     print(f"\nSalesPilot backend listening on http://{host}:{port}  (docs at /docs, db {repo.path})")
     try:
         uvicorn.run(app, host=host, port=port, log_level="info")

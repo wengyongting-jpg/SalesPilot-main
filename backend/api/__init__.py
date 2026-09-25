@@ -6,5 +6,5 @@ console. The split is not a filter -- `schemas/customer.py` has no shape for a
 score, a state, a signal or any telemetry, so that data cannot reach a customer
 browser even by mistake.
 
-See `docs/api/interface-v1.md` section 2 for the tier table.
+See `docs/v0.0/api/interface-v1.md` section 2 for the tier table.
 """

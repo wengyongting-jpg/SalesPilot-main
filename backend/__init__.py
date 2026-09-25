@@ -2,8 +2,8 @@
 """SalesPilot backend — CareSure AI sales assistant.
 
 An agentic rebuild of the original `salespilot` package. The plan, the reasoning
-and the phase-by-phase acceptance criteria are in `docs/backend-plan.md`; the wire
-contract is `docs/api/interface-v1.md`.
+and the phase-by-phase acceptance criteria are in `docs/v0.0/backend/backend-plan.md`; the wire
+contract is `docs/v0.0/api/interface-v1.md`.
 
 Layering
 --------

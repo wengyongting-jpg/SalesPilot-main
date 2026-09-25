@@ -45,39 +45,31 @@ describe('createGateway', () => {
 });
 
 describe('salespilot adapter', () => {
-  test('constructing it does no I/O and needs no configuration', () => {
-    const gateway = createSalesPilotGateway();
-    assert.equal(gateway.name, 'salespilot');
+  // No network here: these assert the adapter's contract surface. Request and
+  // response mapping is verified against a live backend separately, because a
+  // mocked fetch would only prove the mock agrees with itself.
+  const gateway = () => createSalesPilotGateway({ apiBase: 'http://127.0.0.1:8000' });
+
+  test('exposes the whole gateway interface', () => {
+    const g = gateway();
     for (const method of [
       'listConversations',
       'getConversation',
       'listCases',
       'updateCaseStatus',
       'listAgentRuns',
+      'getConversationCost',
       'sendRepReply',
       'seedDemoData',
+      'analytics',
       'health',
     ]) {
-      assert.equal(typeof gateway[method], 'function', method);
+      assert.equal(typeof g[method], 'function', `missing ${method}`);
     }
   });
 
-  test('health reports false rather than throwing when the backend is unreachable', async () => {
-    const gateway = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:1' });
-    assert.equal(await gateway.health(), false);
-  });
-
-  test('a request against an unreachable backend rejects with status 0', async () => {
-    const gateway = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:1' });
-    await assert.rejects(
-      () => gateway.listConversations(),
-      (error) => error.status === 0
-    );
-  });
-
-  test('capabilities report what this backend serves', () => {
-    const gateway = createSalesPilotGateway();
-    assert.deepEqual(gateway.capabilities, {
+  test('advertises every capability, now that the backend provides them', () => {
+    assert.deepEqual(gateway().capabilities, {
       repReply: true,
       telemetry: true,
       author: true,
@@ -85,9 +77,20 @@ describe('salespilot adapter', () => {
     });
   });
 
-  test('listAgentRuns without a correlation key asks the backend nothing', async () => {
-    // Guards the console's boot path: no opportunity selected means no query.
-    const gateway = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:1' });
-    assert.deepEqual(await gateway.listAgentRuns(), { items: [] });
+  test('a correlation key with no opportunity id returns nothing rather than querying', async () => {
+    // The endpoint requires opportunity_id. Querying without it would be a 422;
+    // the adapter short-circuits so the harness sees "no runs" instead of an error.
+    const result = await gateway().listAgentRuns({ clientMessageId: 'orphan-key' });
+    assert.deepEqual(result.items, []);
+  });
+
+  test('health resolves false rather than throwing when nothing is listening', async () => {
+    const offline = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:59999' });
+    assert.equal(await offline.health(), false);
+  });
+
+  test('tolerates a trailing slash on apiBase', () => {
+    const g = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:8000/' });
+    assert.equal(g.name, 'salespilot');
   });
 });

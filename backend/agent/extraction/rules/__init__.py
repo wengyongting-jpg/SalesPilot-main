@@ -1,37 +1,80 @@
 # -*- coding: utf-8 -*-
-"""Rule-based classifiers: the offline peer of model-based extraction.
+"""The rule-based extractor: the offline peer of model-based extraction.
 
-Deterministic, standard library only, no network. This is what runs when no
-model is configured, and it is a first-class path rather than a fallback hack.
+Deterministic, standard library only, no network. This is what runs when no model is
+configured, and it is a first-class path rather than a fallback hack — the whole
+system completes a conversation on it, which is what makes the demo independent of a
+provider being reachable.
+
+It is honest about its own limits in one specific way. `genuine_enquiry` stays true
+unless a deterministic solicitation marker fires: a keyword list is not in a position
+to judge whether somebody is a real prospective customer, so it does not accuse. The
+qualification gate then requires two strikes before acting, which means a rule-based
+misjudgement costs a customer nothing.
 """
 from __future__ import annotations
 
 from typing import Optional
 
 from ....domain.detection import Detection
-from ....domain.message import Message
-from . import intent as _intent
-from . import product as _product
-from . import signals as _signals
+from ....domain.enums import Intent, Product, Signal
+from ....observability import RunRecorder
+from .. import ExtractionOutcome
+from . import intent as intent_rules
+from . import product as product_rules
+from . import signals as signal_rules
+
+_RESTRICTED_SIGNALS = frozenset(
+    {Signal.HUMAN_REQUEST, Signal.COMPLIANCE_RISK, Signal.NEGOTIATION}
+)
+_RESTRICTED_INTENTS = frozenset({Intent.UNDERWRITING, Intent.COMPLAINT})
 
 
-def extract(text: str, context: Optional[list[Message]] = None) -> Detection:
-    """The rule-based peer of `extraction.model_based.extract`: same shape, no model."""
-    detected_intent = _intent.detect(text, context)
-    detected_product = _product.detect(text, context)
-    observed = _signals.detect(text, detected_intent, detected_product, context)
-    return Detection(
-        intent=detected_intent,
-        product=detected_product,
-        signals=observed.signals,
-        concerns=observed.concerns,
-        restricted=observed.restricted,
-        cancellation=observed.cancellation,
-        postponement=observed.postponement,
-        # A keyword list judges "is this advertising" reasonably (solicitation,
-        # below) but judges "is this a genuine enquiry" badly — see
-        # `backend/domain/detection.py`. The rule-based peer stays at the
-        # default (True) here rather than guessing.
-        genuine_enquiry=True,
-        solicitation=observed.solicitation,
-    )
+class RuleExtractor:
+    """Phrase matching over intent, product and signals."""
+
+    def extract(
+        self,
+        text: str,
+        context: Optional[list] = None,
+        *,
+        recorder: Optional[RunRecorder] = None,
+    ) -> ExtractionOutcome:
+        # Record extraction step if recorder is provided
+        if recorder:
+            with recorder.step("extraction", "rule") as step:
+                intent = intent_rules.detect(text, context=context)
+                product = product_rules.detect(text, context=context)
+                signals, concerns = signal_rules.detect(text, intent, product, context=context)
+                step.note(f"intent={intent.value} product={product.value} signals={len(signals)}")
+        else:
+            intent = intent_rules.detect(text, context=context)
+            product = product_rules.detect(text, context=context)
+            signals, concerns = signal_rules.detect(text, intent, product, context=context)
+
+        solicitation = signal_rules.is_solicitation(text)
+        detection = Detection(
+            intent=intent,
+            product=product,
+            signals=signals,
+            concerns=concerns,
+            restricted=(
+                bool(set(signals) & _RESTRICTED_SIGNALS)
+                or intent in _RESTRICTED_INTENTS
+            ),
+            cancellation=signal_rules.is_cancellation(text),
+            postponement=signal_rules.is_postponement(text),
+            # A keyword list cannot judge genuineness, so it only reports the
+            # deterministic marker and leaves the semantic call to a model or,
+            # failing that, to the gate's two-strike rule.
+            genuine_enquiry=not solicitation,
+            solicitation=solicitation,
+        )
+        return ExtractionOutcome(detection=detection, source="rules")
+
+
+def extract(text: str, context: Optional[list] = None) -> Detection:
+    """Convenience function for rule-based extraction."""
+    extractor = RuleExtractor()
+    outcome = extractor.extract(text, context=context)
+    return outcome.detection

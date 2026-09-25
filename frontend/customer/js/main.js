@@ -15,6 +15,8 @@ import { createBanner } from './views/banner.js';
 import { createMessageList } from './views/messageList.js';
 import { createComposer } from './views/composer.js';
 import { createJumpToLatest } from './views/jumpToLatest.js';
+import { createQuickReplies } from './views/quickReplies.js';
+import { createQuestionChoices } from './views/questionChoices.js';
 
 document.title = strings.documentTitle;
 
@@ -30,6 +32,10 @@ const telemetry = createTelemetry();
 /** @type {ReturnType<typeof createGateway>|null} */
 let gateway = null;
 let bootError = null;
+let pollCursor = null;
+let pollTimer = null;
+let pollInFlight = false;
+let healthInFlight = false;
 try {
   gateway = createGateway(config);
 } catch (error) {
@@ -37,51 +43,6 @@ try {
   // presenting a blank screen that looks like it is working.
   bootError = error;
   console.error('[customer-chat] transport unavailable:', error.message);
-}
-
-// ---- Polling (requirement 8.7: only while a human owns the conversation) --
-//
-// There is no push channel, so a representative's reply is only visible once
-// this device asks for it. Polling the full transcript on every tick would
-// work but re-sends everything already rendered; `fetchSince` plus a tracked
-// cursor asks for only what is new. The cursor is the last message *id* seen
-// from the gateway, not from `sendRequested`'s locally-created bubble, which
-// has no id until a real message arrives to replace it.
-
-let pollTimer = null;
-let lastMessageId = null;
-let underTakeover = false;
-
-function trackCursor(messages) {
-  for (const message of messages) {
-    if (message.id) lastMessageId = message.id;
-  }
-}
-
-async function pollOnce() {
-  if (!gateway) return;
-  try {
-    const { messages = [] } = await gateway.fetchSince(customerId, lastMessageId ?? undefined);
-    if (messages.length === 0) return;
-    trackCursor(messages);
-    store.replyReceived(messages);
-  } catch (error) {
-    // A missed tick is not fatal: the next one retries, and the customer's
-    // own next send() reconciles `humanTakeover` regardless.
-    console.error('[customer-chat] poll failed:', error);
-  }
-}
-
-function startPolling() {
-  if (pollTimer) return;
-  pollOnce(); // don't wait a full interval to notice a reply already sitting there
-  pollTimer = setInterval(pollOnce, config.pollIntervalMs);
-}
-
-function stopPolling() {
-  if (!pollTimer) return;
-  clearInterval(pollTimer);
-  pollTimer = null;
 }
 
 // ---- Actions ---------------------------------------------------------------
@@ -93,11 +54,21 @@ async function loadHistory() {
   }
   store.historyLoading();
   try {
-    const { messages = [], humanTakeover = false } =
+    const {
+      messages = [],
+      humanTakeover = false,
+      repName = null,
+      capabilities = null,
+      quickReplies: restoredQuickReplies = [],
+      question: restoredQuestion = null,
+    } =
       await gateway.loadHistory(customerId);
     store.historyLoaded(messages);
-    trackCursor(messages);
-    if (humanTakeover) store.takeoverChanged(true);
+    store.quickRepliesChanged(restoredQuickReplies);
+    store.questionChanged(restoredQuestion);
+    pollCursor = messages.at(-1)?.id ?? null;
+    if (capabilities) store.capabilitiesDetected(capabilities);
+    store.takeoverRestored(humanTakeover, repName);
     messageList.scrollToBottom();
   } catch (error) {
     console.error('[customer-chat] history load failed:', error);
@@ -130,22 +101,23 @@ async function send(text, retryClientId) {
       clientId: message.clientId,
     });
 
-    // The gateway does not surface a real HTTP status yet; the SalesPilot adapter
-    // will pass one through. 200 here means "resolved successfully".
+    // The live gateway surfaces the real HTTP status. Mock mode falls back to
+    // 200 because no HTTP exchange exists there.
     status = result?.status ?? 200;
 
     store.sendAcknowledged(message.clientId);
 
     if (result?.capabilities) store.capabilitiesDetected(result.capabilities);
 
-    trackCursor(result?.messages ?? []);
-    store.replyReceived(result?.messages ?? []);
-    store.markRead(message.clientId);
-
+    const replies = result?.messages ?? [];
     if (typeof result?.humanTakeover === 'boolean') {
       store.takeoverChanged(result.humanTakeover, result.repName ?? null);
     }
+    store.replyReceived(replies);
+    pollCursor = replies.at(-1)?.id ?? pollCursor;
+    store.markRead(message.clientId);
     store.quickRepliesChanged(result?.quickReplies ?? []);
+    store.questionChanged(result?.question ?? null);
   } catch (error) {
     // Diagnostics go to the console; the customer sees a generic failed state.
     console.error('[customer-chat] send failed:', error);
@@ -170,7 +142,7 @@ async function reset() {
       console.error('[customer-chat] reset failed:', error);
     }
   }
-  lastMessageId = null;
+  pollCursor = null;
   store.conversationReset();
   composer.focus();
 }
@@ -179,6 +151,59 @@ function updateConnection() {
   // Requirement 8.3: reflect the browser going offline immediately, without
   // waiting for a request to fail.
   store.connectionChanged(navigator.onLine ? 'online' : 'offline');
+}
+
+async function checkHealth() {
+  if (!gateway || healthInFlight) return;
+  if (!navigator.onLine) {
+    store.connectionChanged('offline');
+    return;
+  }
+
+  healthInFlight = true;
+  store.connectionChanged('checking');
+  try {
+    store.connectionChanged((await gateway.health()) ? 'online' : 'offline');
+  } finally {
+    healthInFlight = false;
+  }
+}
+
+async function pollForMessages() {
+  if (!gateway || pollInFlight || !navigator.onLine) return;
+  pollInFlight = true;
+  try {
+    const result = await gateway.fetchSince(customerId, pollCursor);
+    const messages = result?.messages ?? [];
+    if (typeof result?.humanTakeover === 'boolean') {
+      store.takeoverChanged(result.humanTakeover, result.repName ?? null);
+    }
+    store.replyReceived(messages);
+    pollCursor = messages.at(-1)?.id ?? pollCursor;
+  } catch (error) {
+    // A reset from another surface removes the conversation. Treat that as an
+    // ended takeover and stop polling instead of logging the same 404 forever.
+    if (error?.status === 404) {
+      pollCursor = null;
+      store.takeoverRestored(false);
+      return;
+    }
+    console.error('[customer-chat] takeover poll failed:', error);
+  } finally {
+    pollInFlight = false;
+  }
+}
+
+function syncTakeoverPolling(state) {
+  const shouldPoll =
+    state.assistant.humanTakeover && state.capabilities.incrementalFetch;
+  if (shouldPoll && pollTimer === null) {
+    pollForMessages();
+    pollTimer = window.setInterval(pollForMessages, config.pollIntervalMs);
+  } else if (!shouldPoll && pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
 }
 
 // ---- Views -----------------------------------------------------------------
@@ -217,17 +242,23 @@ const composer = createComposer({
   onTyping: () => store.quickRepliesChanged([]),
 });
 
-const views = [header, banner, messageList, jumpToLatest, composer];
+const quickReplies = createQuickReplies({
+  el: document.getElementById('quickReplies'),
+  onSelect: (text) => send(text),
+});
+
+const questionChoices = createQuestionChoices({
+  el: document.getElementById('questionChoices'),
+  onSelect: (optionId) => send(optionId),
+  onOther: () => composer.focus(),
+});
+
+const views = [header, banner, messageList, jumpToLatest, quickReplies, questionChoices, composer];
 
 store.subscribe((state) => {
   for (const view of views) view.render(state);
+  syncTakeoverPolling(state);
   reportState(state);
-
-  if (state.assistant.humanTakeover !== underTakeover) {
-    underTakeover = state.assistant.humanTakeover;
-    if (underTakeover) startPolling();
-    else stopPolling();
-  }
 });
 
 // ---- Harness integration (inert unless embedded) ----------------------------
@@ -235,7 +266,7 @@ store.subscribe((state) => {
 /**
  * Counters reported to the console. Named `customerMessageCount` on purpose:
  * it counts messages the customer sent, which is not an agent turn count.
- * See docs/api/interface-v1.md §1.1.
+ * See docs/v0.0/api/interface-v1.md §1.1.
  */
 function reportState(state) {
   if (!telemetry.enabled) return;
@@ -264,10 +295,9 @@ telemetry.onCommand((type, payload) => {
 
     case 'receive': {
       // Deliver an inbound message to the device without a round trip. This is
-      // how the harness shows what a *human representative's* reply looks like
-      // from the customer's side: in the real system the device would pick it up
-      // by polling, which needs a backend write path that does not exist yet
-      // (docs/backend-contract.md item 4).
+      // how the harness can preview a representative reply without persisting
+      // it. The ordinary Inbox path persists the reply and takeover polling
+      // retrieves it from the backend.
       const text = typeof payload.text === 'string' ? payload.text.trim() : '';
       if (!text) break;
 
@@ -293,9 +323,15 @@ telemetry.onCommand((type, payload) => {
 
 // ---- Start -----------------------------------------------------------------
 
-window.addEventListener('online', updateConnection);
+window.addEventListener('online', () => {
+  updateConnection();
+  checkHealth();
+  pollForMessages();
+});
 window.addEventListener('offline', updateConnection);
 updateConnection();
+checkHealth();
+window.setInterval(checkHealth, config.healthIntervalMs);
 
 if (bootError) {
   store.historyFailed();

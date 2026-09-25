@@ -1,17 +1,10 @@
 # -*- coding: utf-8 -*-
-"""SalesPilot entry point.
+"""Compatibility entry point for the current backend.
 
-Usage:
-    py -3 run.py              # Interactive chat simulation (minimal WhatsApp mock)
-    py -3 run.py --demo       # Run the scripted demo and print the sales dashboard
-    py -3 run.py --seed --db runtime/salespilot.db
-                              # Persist demo data into a SQLite database
-    py -3 run.py --serve --seed
-                              # Start the FastAPI service, seeding demo data first
-    py -3 run.py --semantic   # Use the offline embedding/vector-store retriever
+Prefer ``python -m backend``. The accepted options are those of
+``backend.cli``; legacy interactive and semantic options are no longer present.
 """
 import sys
-from pathlib import Path
 
 # --- Python version guard ------------------------------------------------
 # SalesPilot uses `X | None` type syntax which requires Python 3.10+. Give a
@@ -29,10 +22,7 @@ if sys.version_info < _MIN_PYTHON:
     )
     raise SystemExit(1)
 
-# Allow running directly from the project root (no `pip install -e .` needed)
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from salespilot.cli import main  # noqa: E402
+from backend.cli import main  # noqa: E402
 
 if __name__ == "__main__":
     # UTF-8 fallback for Windows consoles

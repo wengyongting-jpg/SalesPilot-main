@@ -1,62 +1,94 @@
 # -*- coding: utf-8 -*-
-"""The customer surface — `interface-v1.md` §5.1, §5.5, §5.6.
+"""The customer surface. `docs/v0.0/api/interface-v1.md` §5.1.
 
-Every route here declares a `schemas.customer` response model. That is the
-visibility boundary: whatever the service returns, only the fields those
-models define can leave the process.
+Three endpoints, and every response goes through a projection in
+`api.schemas.customer` that has no field for sales intelligence. The tier boundary is
+the type, not the care taken here.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Request
 
-from ...services import opportunities
-from ...services.conversation import ConversationService
-from ...storage.base import Repository
-from ..deps import get_repo, get_service
+from ...storage.base import MalformedCursor
+from ...services.conversation import QuestionAnswerTooLong
+from .. import errors
+from ..deps import services_of
 from ..schemas.customer import (
-    CustomerMessage,
     CustomerReply,
     CustomerTranscript,
     IncomingMessage,
+    QuickReply,
     ResetResult,
+    project_message,
+    project_reply,
 )
-from ..schemas.shared import message_to_wire
 
-router = APIRouter()
-
-
-@router.post("/messages", response_model=CustomerReply)
-def post_message(
-    body: IncomingMessage, service: ConversationService = Depends(get_service)
-) -> CustomerReply:
-    result = service.handle_customer_message(
-        body.customer_id,
-        body.customer_name,
-        body.text,
-        client_message_id=body.client_message_id,
-    )
-    # A replay and a fresh turn take the same path: the receipt carries a few
-    # admin-only keys and the model drops them.
-    return CustomerReply.model_validate(result.receipt)
+router = APIRouter(tags=["customer"])
 
 
-@router.get("/conversations/{opportunity_id}", response_model=CustomerTranscript)
+@router.post("/api/messages", response_model=CustomerReply)
+def post_message(payload: IncomingMessage, request: Request) -> CustomerReply:
+    """Process one customer message through the full pipeline.
+
+    Supplying `client_message_id` makes the call idempotent: replaying the same id for
+    the same customer returns the stored response without re-running the pipeline. That
+    is how a retry after a timeout remains safe.
+    """
+    try:
+        result = services_of(request).conversation.handle_customer_message(
+            customer_id=payload.customer_id,
+            customer_name=payload.customer_name,
+            text=payload.text,
+            client_message_id=payload.client_message_id,
+        )
+    except QuestionAnswerTooLong as error:
+        raise errors.bad_request(str(error))
+
+    return project_reply(result.to_dict())
+
+
+@router.get("/api/conversations/{conversation_id}", response_model=CustomerTranscript)
 def get_conversation(
-    opportunity_id: str,
-    since: Optional[str] = Query(default=None),
-    repo: Repository = Depends(get_repo),
+    conversation_id: str, request: Request, since: Optional[str] = None
 ) -> CustomerTranscript:
-    opp = opportunities.require(repo, opportunity_id)
-    messages = opportunities.messages_since(opp, since)
+    """The transcript, optionally only what is newer than `since`.
+
+    `since` accepts a message id or an ISO-8601 timestamp. A cursor that is neither is
+    a 400 rather than a silent full read, because a client sending a malformed cursor
+    would otherwise look healthy while re-transferring the whole transcript on every
+    poll.
+    """
+    repo = services_of(request).repo
+    opportunity = repo.get_opportunity(conversation_id, history_limit=0)
+    if opportunity is None:
+        raise errors.not_found(f"Conversation {conversation_id} not found")
+
+    from ...services import opportunities
+
+    try:
+        messages = opportunities.messages_since(opportunity, since)
+    except MalformedCursor as error:
+        raise errors.bad_request(str(error))
+
+    from ...services.serialisation import message_to_dict, opportunity_to_dict
+
     return CustomerTranscript(
-        opportunity_id=opp.id,
-        human_takeover=opp.human_takeover,
-        messages=[CustomerMessage.model_validate(message_to_wire(m)) for m in messages],
+        conversation_id=conversation_id,
+        human_takeover=opportunity.human_takeover,
+        messages=[project_message(message_to_dict(m)) for m in messages],
+        quick_replies=(
+            [QuickReply(id="handoff_confirm", label="Confirm"),
+             QuickReply(id="handoff_cancel", label="Cancel")]
+            if opportunity.pending_handoff_reason else []
+        ),
+        customer_question=opportunity_to_dict(opportunity)["customer_question"],
     )
 
 
-@router.delete("/conversations/{opportunity_id}", response_model=ResetResult)
-def reset_conversation(opportunity_id: str, repo: Repository = Depends(get_repo)) -> ResetResult:
-    return ResetResult(deleted=opportunities.reset(repo, opportunity_id), opportunity_id=opportunity_id)
+@router.delete("/api/conversations/{conversation_id}", response_model=ResetResult)
+def reset_conversation(conversation_id: str, request: Request) -> ResetResult:
+    """Reset a conversation. Idempotent, so a demo operator can press it twice."""
+    existed = services_of(request).conversation.reset(conversation_id)
+    return ResetResult(deleted=existed, conversation_id=conversation_id)

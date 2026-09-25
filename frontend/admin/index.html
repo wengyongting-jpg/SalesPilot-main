@@ -30,12 +30,27 @@
           <div class="conv-composer" id="convComposer"></div>
         </div>
         <aside class="inbox__side" id="inboxSide">
-          <div class="panel-tabs" id="panelTabs"></div>
-          <div class="panel-body">
-            <div class="panel" id="panelIntelligence"></div>
-            <div class="panel" id="panelObservability"></div>
-          </div>
+          <div id="inboxOverview"></div>
         </aside>
+      </div>
+    </section>
+
+    <!-- ===== DEBUG ===== -->
+    <section class="route" id="route-debug" data-route="debug">
+      <div class="route__inner debug-route">
+        <h1>Diagnostics</h1>
+        <p>Internal demo view. Browser API traces redact credential fields; this console has no authentication.</p>
+        <div id="debugHealth"></div>
+        <label for="debugConversation">Conversation</label>
+        <select id="debugConversation" aria-label="Conversation to inspect"></select>
+        <div class="panel-tabs" id="panelTabs"></div>
+        <div class="panel-body">
+          <div class="panel" id="panelIntelligence"></div>
+          <div class="panel" id="panelObservability"></div>
+        </div>
+        <div id="debugScoreEvidence"></div>
+        <h2>Recent browser API exchanges</h2>
+        <div id="debugRequests"></div>
       </div>
     </section>
 

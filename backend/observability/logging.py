@@ -16,6 +16,11 @@ from .run import AgentRun
 _LOGGER_NAME = "salespilot.backend"
 
 
+def get_logger() -> _logging.Logger:
+    """Get or create the configured logger. Alias for configure()."""
+    return configure()
+
+
 def configure() -> _logging.Logger:
     """Idempotent: safe to call from the CLI, the API and tests alike."""
     logger = _logging.getLogger(_LOGGER_NAME)

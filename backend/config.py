@@ -12,12 +12,52 @@ rebuild exists to eliminate.
 from __future__ import annotations
 
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 # ---- Paths ---------------------------------------------------------------
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_DIR.parent
+
+# ---- Local configuration file --------------------------------------------
+
+ENV_FILE = REPO_ROOT / ".env"
+
+
+def load_env_file(path: Path = ENV_FILE) -> list[str]:
+    """Read `.env` into the environment. Returns the names it set.
+
+    Hand-rolled rather than adding `python-dotenv`: it is twenty lines, and the
+    backend's dependency list is short enough to be worth keeping that way.
+
+    **A real environment variable always wins.** The file is a convenience for local
+    work, so `SALESPILOT_LLM_API_KEY=... ; py -3 -m backend --serve` must not be
+    silently overridden by a stale line in a file somebody forgot about.
+    """
+    if not path.exists():
+        return []
+
+    applied: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip()
+        value = value.strip()
+        # Strip one layer of matching quotes, so a value with spaces can be quoted
+        # without the quotes becoming part of it.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if not name or name in os.environ:
+            continue
+        os.environ[name] = value
+        applied.append(name)
+    return applied
+
+
+ENV_FILE_APPLIED = load_env_file()
 
 # Backend-owned data ships inside the package.
 DATA_DIR = PACKAGE_DIR / "knowledge" / "data"
@@ -63,7 +103,36 @@ if HACKATHON_GATEWAY_URL:
     LLM_API_BASE = HACKATHON_GATEWAY_URL
 
 LLM_TIMEOUT_SECONDS = float(_env("SALESPILOT_LLM_TIMEOUT", "30"))
-LLM_MAX_TOOL_STEPS = int(_env("SALESPILOT_LLM_MAX_TOOL_STEPS", "6"))
+LLM_MAX_TOOL_STEPS = int(_env("SALESPILOT_LLM_MAX_TOOL_STEPS", "3"))
+LLM_REQUEST_LIMIT = int(_env("SALESPILOT_LLM_REQUEST_LIMIT", "5"))
+LLM_TOTAL_TOKEN_LIMIT = int(_env("SALESPILOT_LLM_TOTAL_TOKEN_LIMIT", "12000"))
+LLM_OUTPUT_TOKEN_LIMIT = int(_env("SALESPILOT_LLM_OUTPUT_TOKEN_LIMIT", "2500"))
+LLM_PER_REQUEST_INPUT_TOKEN_LIMIT = int(
+    _env("SALESPILOT_LLM_PER_REQUEST_INPUT_TOKEN_LIMIT", "6000")
+)
+
+
+def _decimal_env(name: str, default: str) -> Decimal:
+    try:
+        value = Decimal(_env(name, default))
+    except InvalidOperation as error:
+        raise ValueError(f"{name} must be a decimal number") from error
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return value
+
+
+LLM_COST_LIMIT_USD = _decimal_env("SALESPILOT_LLM_COST_LIMIT_USD", "0.03")
+
+# Fictional demo business: no real hours exist to look up. Configure an approved
+# schedule before telling a customer when a representative will be available.
+# JSON keys are Python weekday numbers (0 Monday ... 6 Sunday), values are arrays
+# of ["HH:MM", "HH:MM"] windows in Asia/Singapore. Dates use YYYY-MM-DD.
+STAFF_HOURS_JSON = _env("SALESPILOT_STAFF_HOURS_JSON")
+STAFF_CLOSED_DATES = frozenset(
+    value.strip() for value in _env("SALESPILOT_STAFF_CLOSED_DATES").split(",")
+    if value.strip()
+)
 
 # ---- Observability -------------------------------------------------------
 # Prompts and raw model output are recorded and returned on the admin tier.
@@ -93,15 +162,29 @@ RETRIEVAL_CONFIDENCE_ESCALATE = 0.5
 
 API_HOST = _env("SALESPILOT_HOST", "127.0.0.1")
 API_PORT = int(_env("SALESPILOT_PORT", "8000"))
-# The backend serves no UI (docs/backend-plan.md §4 rule 7); both frontends are
-# served from their own origin, so cross-origin requests are the normal case.
-# Permissive by default because this is an unauthenticated demo; narrow it with
-# a comma-separated list for anything else.
-CORS_ORIGINS = [o.strip() for o in _env("SALESPILOT_CORS_ORIGINS", "*").split(",") if o.strip()]
+
+# Browser origins permitted to call the API. The two frontends are served as static
+# files from a different port, so they are always cross-origin; without this a browser
+# refuses every request before it reaches the backend.
+#
+# Loopback development origins only, and deliberately **not** `["*"]`. Nothing here is
+# protected today — there is no authentication anywhere, which is a recorded demo
+# limitation — but a wildcard sets a habit that becomes a real hole the moment auth
+# exists. `allow_credentials` stays off for the same reason: there are no cookies or
+# sessions to send, so permitting them would widen the surface for no benefit.
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in _env(
+        "SALESPILOT_CORS_ORIGINS",
+        "http://127.0.0.1:8123,http://localhost:8123,"
+        "http://127.0.0.1:5500,http://localhost:5500",
+    ).split(",")
+    if origin.strip()
+]
 
 # ---- Compliance ----------------------------------------------------------
 # Appended verbatim whenever a reply quotes a premium. Never truncated, never
-# hidden: `.kiro/steering/product.md` treats this as a red line.
+# hidden: `docs/v0.0/product/product.md` treats this as a red line.
 DEMO_DISCLAIMER = (
     "All premiums are fictional indicative rates for the SalesPilot demo and do "
     "not represent actual insurance quotations. Final premiums are subject to age, "
@@ -109,22 +192,48 @@ DEMO_DISCLAIMER = (
 )
 
 
+def redact(secret: str | None) -> str:
+    """Describe a secret without revealing it.
+
+    Shows only whether it exists and its length. Even a short suffix is avoidable
+    credential material in shared logs and screen recordings.
+    """
+    if not secret:
+        return "absent"
+    return f"set ({len(secret)} chars)"
+
+
 def describe() -> dict[str, object]:
     """A configuration summary safe to print at startup and to log.
 
-    Secrets are reported as presence, never as value.
+    Secrets are reported by shape, never by value.
     """
     return {
+        "env file": (
+            f"{ENV_FILE.name} ({len(ENV_FILE_APPLIED)} settings)"
+            if ENV_FILE_APPLIED
+            else ("present, nothing applied" if ENV_FILE.exists() else "not present")
+        ),
         "provider": LLM_PROVIDER,
         "model": LLM_MODEL,
         "api_base": LLM_API_BASE or "(provider default)",
-        "api_key": "set" if LLM_API_KEY else "absent",
+        "api_key": redact(LLM_API_KEY),
         "telemetry_content": "on" if TELEMETRY_CONTENT else "off",
-        "telemetry_content_max": TELEMETRY_CONTENT_MAX_CHARS,
         "console_trace": "on" if CONSOLE_TRACE else "off",
-        "console_colour": "on" if CONSOLE_COLOUR else "off",
-        "log_file": str(LOG_FILE),
-        "cors_origins": ",".join(CORS_ORIGINS),
+        "model_limits": (
+            f"tools={LLM_MAX_TOOL_STEPS}, requests={LLM_REQUEST_LIMIT}, "
+            f"tokens={LLM_TOTAL_TOKEN_LIMIT}, output={LLM_OUTPUT_TOKEN_LIMIT}, "
+            f"cost=${LLM_COST_LIMIT_USD} per segment"
+        ),
         "knowledge_base": str(KB_PATH),
         "database": str(DEFAULT_DB_PATH),
     }
+
+
+def model_configured() -> bool:
+    """Whether a model call could even be attempted.
+
+    A provider name alone is not enough: `SALESPILOT_LLM=gateway` with no key would
+    otherwise produce a failure on every message instead of running the offline path.
+    """
+    return LLM_PROVIDER not in ("offline", "", "stub") and bool(LLM_API_KEY)

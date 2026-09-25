@@ -2,7 +2,7 @@
  * Transport selection for the admin console.
  *
  * One adapter chosen at boot from configuration. Every adapter normalises to the
- * shapes in .kiro/specs/admin-console-ui/design.md § Data models, so no view or
+ * shapes in docs/v0.0/frontend/admin-console-ui/design.md § Data models, so no view or
  * store code knows which transport is active.
  *
  * Adapter interface:

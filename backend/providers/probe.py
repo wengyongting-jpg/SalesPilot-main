@@ -7,6 +7,8 @@ raises; it degrades to a reported reason so `--probe` always exits 0.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Optional
 import urllib.error
 import urllib.request
 
@@ -17,7 +19,15 @@ _DEFAULT_BASE_URL = "https://api.openai.com/v1"
 _PROBE_TIMEOUT_SECONDS = 5.0
 
 
-def probe() -> dict[str, object]:
+@dataclass
+class ProbeResult:
+    """Result of a provider reachability probe."""
+    provider: str
+    reachable: Optional[bool]
+    detail: str
+
+
+def probe() -> ProbeResult:
     """Report the effective model configuration and whether it looks reachable.
 
     Returns a dict rather than raising, so a caller (the CLI, a startup log
@@ -26,22 +36,22 @@ def probe() -> dict[str, object]:
     provider = config.LLM_PROVIDER
 
     if provider == "offline":
-        return {
-            "provider": "offline",
-            "reachable": None,
-            "detail": "offline mode — no model configured, deterministic path only",
-        }
+        return ProbeResult(
+            provider="offline",
+            reachable=None,
+            detail="offline mode — no model configured, deterministic path only",
+        )
 
     cfg = from_config()
     if not cfg.api_key:
-        return {
-            "provider": provider,
-            "reachable": False,
-            "detail": "no API key configured — falling back to the offline path",
-        }
+        return ProbeResult(
+            provider=provider,
+            reachable=False,
+            detail="no API key configured — falling back to the offline path",
+        )
 
     reachable, detail = _check_reachable(cfg)
-    return {"provider": provider, "reachable": reachable, "detail": detail}
+    return ProbeResult(provider=provider, reachable=reachable, detail=detail)
 
 
 def _check_reachable(cfg: OpenAICompatibleConfig) -> tuple[bool, str]:

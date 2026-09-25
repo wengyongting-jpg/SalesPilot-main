@@ -86,12 +86,17 @@ def _score_entry_to_dict(entry: ScoreHistoryEntry) -> dict[str, Any]:
         "score": entry.score,
         "state": entry.state,
         "trigger": entry.trigger,
+        "evidence": dict(entry.evidence),
     }
 
 
 def _score_entry_from_dict(data: dict[str, Any]) -> ScoreHistoryEntry:
     return ScoreHistoryEntry(
-        timestamp=_dt(data["ts"]), score=data["score"], state=data["state"], trigger=data["trigger"]
+        timestamp=_dt(data["ts"]),
+        score=data["score"],
+        state=data["state"],
+        trigger=data["trigger"],
+        evidence=dict(data.get("evidence", {})),
     )
 
 
@@ -135,6 +140,10 @@ def opportunity_to_dict(opp: Opportunity) -> dict[str, Any]:
         "state_history": [_state_entry_to_dict(e) for e in opp.state_history],
         "human_takeover": opp.human_takeover,
         "human_intervention_required": opp.human_intervention_required,
+        "pending_handoff_reason": opp.pending_handoff_reason,
+        "pending_question_field": opp.pending_question_field,
+        "collected_answers": dict(opp.collected_answers),
+        "evidence_sources": dict(opp.evidence_sources),
         "qualification": opp.qualification.value,
         "qualification_reason": opp.qualification_reason,
         "solicitation_count": opp.solicitation_count,
@@ -166,6 +175,10 @@ def opportunity_from_dict(data: dict[str, Any]) -> Opportunity:
         state_history=[_state_entry_from_dict(e) for e in data.get("state_history", [])],
         human_takeover=bool(data.get("human_takeover", False)),
         human_intervention_required=bool(data.get("human_intervention_required", False)),
+        pending_handoff_reason=data.get("pending_handoff_reason"),
+        pending_question_field=data.get("pending_question_field"),
+        collected_answers=dict(data.get("collected_answers", {})),
+        evidence_sources=dict(data.get("evidence_sources", {})),
         qualification=Qualification(data.get("qualification", Qualification.QUALIFIED.value)),
         qualification_reason=data.get("qualification_reason"),
         solicitation_count=int(data.get("solicitation_count", 0)),

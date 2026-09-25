@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Terminal rendering of one agent run — `docs/backend-plan.md` §7.
+"""Terminal rendering of one agent run — `docs/v0.0/backend/backend-plan.md` §7.
 
     ▶ run ar-91c4  C-1024  customer_message  key=c-8f2a1b40
       0 extraction           llm        820ms  ok      gpt-4o-mini  412+88=500 tok  $0.00021
@@ -24,10 +24,10 @@ _KIND_WIDTH = 10
 _STATUS_WIDTH = 8
 _WRAP_WIDTH = 80
 
-_MARK_RUN = "▶"
-_MARK_OK = "✔ ok"
-_MARK_DEGRADED = "⚠ degraded"
-_MARK_ERROR = "✖ error"
+_MARK_RUN = ">"
+_MARK_OK = "[OK]"
+_MARK_DEGRADED = "[WARN]"
+_MARK_ERROR = "[ERROR]"
 
 _RESET = "\033[0m"
 _COLOURS = {"ok": "\033[32m", "degraded": "\033[33m", "error": "\033[31m"}

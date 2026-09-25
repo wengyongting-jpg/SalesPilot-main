@@ -33,3 +33,28 @@ class InvalidTransition(ServiceError):
 
 class InvalidCursor(ServiceError):
     """A `since` value that is neither an ISO-8601 timestamp nor a message id (→ 400)."""
+
+
+# ---- Kevin-work exceptions (re-exported for API error handling) ----
+# These are defined in their respective service modules but need to be
+# available at the top level for FastAPI exception handlers.
+
+from .rep_reply import (
+    RepReplyError,
+    UnknownOpportunity,
+    NotUnderTakeover as RepReplyNotUnderTakeover,
+)
+
+
+__all__ = [
+    "ServiceError",
+    "OpportunityNotFound",
+    "CaseNotFound",
+    "NotUnderTakeover",
+    "InvalidTransition",
+    "InvalidCursor",
+    # Kevin-work exceptions
+    "RepReplyError",
+    "UnknownOpportunity",
+    "RepReplyNotUnderTakeover",
+]

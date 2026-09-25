@@ -168,7 +168,7 @@ describe('case transitions', () => {
     assert.ok(store.getState().transition.error);
   });
 
-  test('taking over enables the open conversation', () => {
+  test('taking over attaches the case but does not invent the takeover flag', () => {
     store.conversationLoaded({
       opportunity: { id: 'C-1', humanTakeover: false },
       messages: [],
@@ -176,11 +176,13 @@ describe('case transitions', () => {
     });
     store.transitionSucceeded(caseItem('H-1', 'C-1', 'TAKEN_OVER'));
 
-    assert.equal(store.getState().conversation.opportunity.humanTakeover, true);
     assert.equal(store.getState().conversation.linkedCase.id, 'H-1');
+    // The flag belongs to the backend. Inferring it here would have the console
+    // enable the composer for a reply the backend then rejects with 409.
+    assert.equal(store.getState().conversation.opportunity.humanTakeover, false);
   });
 
-  test('resolving hands the conversation back to the AI', () => {
+  test('resolving detaches the case without inventing the takeover flag', () => {
     store.conversationLoaded({
       opportunity: { id: 'C-1', humanTakeover: true },
       messages: [],
@@ -188,8 +190,8 @@ describe('case transitions', () => {
     });
     store.transitionSucceeded(caseItem('H-1', 'C-1', 'CLOSED'));
 
-    assert.equal(store.getState().conversation.opportunity.humanTakeover, false);
     assert.equal(store.getState().conversation.linkedCase, null);
+    assert.equal(store.getState().conversation.opportunity.humanTakeover, true);
   });
 
   test('a transition for a different customer does not disturb the open one', () => {

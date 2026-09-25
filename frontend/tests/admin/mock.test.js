@@ -50,8 +50,10 @@ describe('capabilities', () => {
     assert.equal(gateway.capabilities.quickReplies, false);
   });
 
-  test('the salespilot adapter advertises what the rebuilt backend serves', () => {
-    const gateway = createSalesPilotGateway();
+  test('the salespilot adapter now advertises the full capability set', () => {
+    // Was a throwing stub advertising nothing. The backend shipped the admin
+    // surface, so the console no longer has to degrade any control.
+    const gateway = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:8000' });
     assert.deepEqual(gateway.capabilities, {
       repReply: true,
       telemetry: true,
@@ -60,9 +62,15 @@ describe('capabilities', () => {
     });
   });
 
-  test('the salespilot adapter reports an unreachable backend rather than hanging', async () => {
-    const gateway = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:1' });
-    assert.equal(await gateway.health(), false);
+  test('the mock and the real adapter expose the same interface', () => {
+    // Guards the substitutability the console depends on: a view must not be
+    // able to tell which transport is behind it.
+    const mock = createMockGateway({ latencyScale: 0 });
+    const real = createSalesPilotGateway({ apiBase: 'http://127.0.0.1:8000' });
+    for (const method of Object.keys(real)) {
+      if (typeof real[method] !== 'function') continue;
+      assert.equal(typeof mock[method], 'function', `mock is missing ${method}`);
+    }
   });
 });
 
