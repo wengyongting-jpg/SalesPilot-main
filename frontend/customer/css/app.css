@@ -333,7 +333,7 @@ body {
 
 /* Markdown formatting in AI messages */
 .bubble__text .message-paragraph {
-  margin: 0 0 0.5em 0;
+  margin: 0 0 0.9em 0;
 }
 
 .bubble__text .message-paragraph:last-child {

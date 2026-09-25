@@ -127,7 +127,7 @@ class KnowledgeRetriever:
             matched_tokens.update(overlap_tokens)
             return len(overlap_tokens)
 
-        facts.append(f"{product_data['name']}: {product_data['positioning']}")
+        facts.append(f"**{product_data['name']}**: {product_data['positioning']}")
 
         for field_name in preferred:
             if field_name in product_data and field_name != "positioning":
@@ -196,7 +196,7 @@ class KnowledgeRetriever:
             data = self.products.get(product.value)
             if data is None:
                 continue
-            facts.append(f"{data['name']}: {data['positioning']}")
+            facts.append(f"**{data['name']}**: {data['positioning']}")
             facts.append(f"{FIELD_LABELS['premium']}: {data['premium']}")
         return RetrievalResult(facts=facts, matches=[], confidence=0.9, product=product_a)
 
@@ -214,7 +214,7 @@ class KnowledgeRetriever:
     def list_products(self) -> list[str]:
         """One approved one-liner per product, for catalogue discovery."""
         return [
-            f"{p['name']} ({p['id']}): {p['positioning']} {p['premium']}"
+            f"**{p['name']}** ({p['id']}): {p['positioning']} {p['premium']}"
             for p in self.kb["products"]
         ]
 
@@ -263,7 +263,7 @@ class KnowledgeRetriever:
         )
         if field:
             facts = [
-                f"{p['name']} ({p['id']}): {p[field]}" for p in self.kb["products"]
+                f"**{p['name']}** ({p['id']}): {p[field]}" for p in self.kb["products"]
             ]
         else:
             facts = self.list_products()
