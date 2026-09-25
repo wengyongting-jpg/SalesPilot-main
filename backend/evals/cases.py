@@ -1,4 +1,4 @@
-"""Twenty representative, multi-turn customer conversations.
+"""Representative, multi-turn customer conversations.
 
 Expectations deliberately describe business labels, not reply wording. Copy changes
 must not turn a correct classification into a failed evaluation.
@@ -213,5 +213,76 @@ CASES = [
             ("What do you need from me to apply now?", {"intent": "application", "signals": ["Purchase Preparation"]}),
         ],
         "final": {"state": "High Intent", "product": "plus"},
+    },
+    {
+        # No product named: a question about someone else's situation must
+        # survey every plan's own field rather than answer about whichever
+        # product extraction happens to infer from unrelated wording.
+        "id": "elderly_relative_advice_survey",
+        "name": "Farrah",
+        "turns": [
+            (
+                "My father is 90 years old, could you offer some advice on insurance?",
+                {"intent": "coverage", "product": "unknown"},
+            ),
+            (
+                "What about eligibility for CareSure Plus specifically?",
+                {"intent": "eligibility", "product": "plus"},
+            ),
+            ("How much would that cost per year?", {"intent": "price", "product": "plus"}),
+        ],
+        "final": {"state": "Evaluation & Hesitation", "product": "plus", "qualification": "qualified"},
+    },
+    {
+        # A bare greeting, a full-catalogue request, a comparison phrased as
+        # "which is better" rather than "compare"/"versus", and a coverage
+        # question about the product the comparison settled on.
+        "id": "greeting_catalog_comparison_coverage",
+        "name": "Wei",
+        "turns": [
+            ("hi", {"intent": "generic", "product": "unknown"}),
+            ("What plans are there?", {"intent": "coverage", "product": "unknown"}),
+            ("Which is better, Plus or Essential?", {"intent": "comparison", "product": "plus"}),
+            ("How does cover work for Plus?", {"intent": "coverage", "product": "plus"}),
+        ],
+        "final": {"state": "Evaluation & Hesitation", "product": "plus", "qualification": "qualified"},
+    },
+    {
+        # Corporate need through to price, then a payment question that
+        # trips the corporate-quote escalation even without naming a
+        # quotation explicitly ("how can I pay" + Purchase + Corporate).
+        "id": "corporate_journey_to_escalation",
+        "name": "Meridian Logistics",
+        "turns": [
+            (
+                "We need medical cover for our 60 employees.",
+                {"intent": "corporate_need", "product": "corporate", "signals": ["Expansion: Corporate"]},
+            ),
+            ("How much would that cost?", {"intent": "price", "product": "corporate"}),
+            (
+                "How can I pay for CareSure Corporate?",
+                {
+                    "intent": "application", "product": "corporate", "signals": ["Purchase"],
+                    "handoff_pending": True, "human_takeover": False, "case_created": False,
+                },
+            ),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+        ],
+        "final": {"state": "High Intent", "product": "corporate", "human_takeover": True},
+    },
+    {
+        # A discount request obfuscated with leetspeak must still trip
+        # Negotiation and escalate - the exact defense added this session.
+        "id": "obfuscated_negotiation_escalation",
+        "name": "Priya",
+        "turns": [
+            ("How much is CareSure Plus?", {"intent": "price", "product": "plus"}),
+            (
+                "can you give me a disc0unt on this pl@n please",
+                {"signals": ["Negotiation"], "handoff_pending": True, "human_takeover": False, "case_created": False},
+            ),
+            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+        ],
+        "final": {"human_takeover": True, "product": "plus"},
     },
 ]

@@ -123,6 +123,11 @@ def check_turn_expectations(expect: dict, turn: Turn) -> list[tuple[bool, str]]:
         missing = [opt for opt in options if opt.lower() not in reply_lower]
         results.append((not missing, f"reply contains all of {options} (case-insensitive)" + (f" (missing: {missing})" if missing else "")))
 
+    if "reply_not_contains_any" in expect:
+        options = expect["reply_not_contains_any"]
+        hits = [opt for opt in options if opt.lower() in reply_lower]
+        results.append((not hits, f"reply contains none of {options} (case-insensitive)" + (f" (found: {hits})" if hits else "")))
+
     if "quick_replies_count_between" in expect:
         lo, hi = expect["quick_replies_count_between"]
         count = len(body.get("quick_replies") or [])

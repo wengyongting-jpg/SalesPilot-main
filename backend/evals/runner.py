@@ -140,7 +140,7 @@ def _redact(value: Any, secret: str) -> Any:
 
 def run_suite(*, use_model: bool, selected: set[str] | None = None,
               storage: str = "memory",
-              max_cases: int = 20, max_turns: int = 67,
+              max_cases: int = 24, max_turns: int = 81,
               max_model_calls: int = 160, max_cost_usd: float = 1.0,
               attempt: int = 1) -> dict[str, Any]:
     if storage not in {"memory", "sqlite"}:
@@ -262,8 +262,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="repository used for the suite (default: memory)")
     parser.add_argument("--case", action="append", dest="cases")
     parser.add_argument("--exclude-case", action="append", dest="excluded_cases")
-    parser.add_argument("--max-cases", type=int, default=20)
-    parser.add_argument("--max-turns", type=int, default=67)
+    parser.add_argument("--max-cases", type=int, default=24)
+    parser.add_argument("--max-turns", type=int, default=81)
     parser.add_argument("--max-model-calls", type=int, default=160)
     parser.add_argument("--max-cost-usd", type=float, default=1.0)
     parser.add_argument("--attempt", type=int, choices=(1, 2, 3), default=1)

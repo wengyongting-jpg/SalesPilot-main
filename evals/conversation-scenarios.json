@@ -498,6 +498,76 @@
           "admin_check": {"expect": {"product": "unknown"}}
         }
       ]
+    },
+    {
+      "id": "regression-bare-greeting-is-short-not-a-catalogue-dump",
+      "category": "regression",
+      "regression_for": "bare-greeting-answered-with-full-plan-catalogue",
+      "description": "A bare \"hi\" must get a short greeting, never the four-plan catalogue.",
+      "turns": [
+        {
+          "send": { "text": "hi" },
+          "expect": {
+            "human_takeover": false,
+            "reply_contains_any": ["hello", "hi there"],
+            "reply_not_contains_any": ["Essential", "Family", "Corporate"],
+            "quick_replies_count_between": [0, 3]
+          }
+        }
+      ]
+    },
+    {
+      "id": "regression-plan-catalogue-is-bold-and-not-bulleted",
+      "category": "regression",
+      "regression_for": "plan-facts-rendered-as-dashed-bullets-with-a-duplicated-header",
+      "description": "\"What plans are there?\" must name every plan in bold, with no literal \"- \" bullet prefix and no duplicated \"here are the plans\" header line.",
+      "turns": [
+        {
+          "send": { "text": "What plans are there?" },
+          "expect": {
+            "human_takeover": false,
+            "reply_contains_all": [
+              "**CareSure Essential**", "**CareSure Family**",
+              "**CareSure Plus**", "**CareSure Corporate**"
+            ],
+            "reply_not_contains_any": ["- CareSure", "Here are the CareSure plans:"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "regression-which-is-better-compares-both-named-plans",
+      "category": "regression",
+      "regression_for": "which-is-better-phrasing-not-classified-as-comparison",
+      "description": "\"Which is better, X or Y\" must answer about both named plans, not silently collapse to one.",
+      "turns": [
+        {
+          "send": { "text": "Which is better, Plus or Essential?" },
+          "expect": {
+            "human_takeover": false,
+            "reply_contains_all": ["**CareSure Plus**", "**CareSure Essential**"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "regression-advice-question-with-no-named-product-surveys-every-plan",
+      "category": "regression",
+      "regression_for": "advice-question-collapsed-to-one-inferred-product",
+      "description": "An open-ended advice question that names no plan (a relative's age, not a product) must survey every plan's own eligibility line rather than answer about whichever product extraction happened to infer.",
+      "turns": [
+        {
+          "send": { "text": "My father is 90 years old, could you offer some advice on insurance?" },
+          "expect": {
+            "human_takeover": false,
+            "reply_contains_all": [
+              "**CareSure Essential**", "**CareSure Family**",
+              "**CareSure Plus**", "**CareSure Corporate**"
+            ]
+          },
+          "admin_check": {"expect": {"product": "unknown"}}
+        }
+      ]
     }
   ],
   "manual_or_white_box_checks": [
