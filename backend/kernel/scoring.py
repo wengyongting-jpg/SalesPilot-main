@@ -53,7 +53,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from ..domain.detection import Detection
+from ..domain.detection import Detection, TransactionIssue
 from ..domain.enums import Intent, MessageRole, Priority, Product, Qualification, Signal
 from ..domain.opportunity import Opportunity, ScoreCard
 from . import priority as priority_rules
@@ -137,10 +137,16 @@ def score(
     *,
     now: datetime,
 ) -> ScoreCard:
-    signals = set(opp.signals) | set(det.signals)
+    signals = (set(opp.signals) | set(det.signals)) - {Signal.CONVERSION}
     text = latest_text.lower()
     withdrawn = Signal.WITHDRAWAL in signals
-    intent = effective_intent(det.intent, opp.best_intent)
+    if det.transaction_issue is not TransactionIssue.NONE:
+        # A customer's report about an order or payment is not verified evidence
+        # of readiness, even when historical intent was strong.
+        signals.discard(Signal.PURCHASE)
+        intent = Intent.GENERIC
+    else:
+        intent = effective_intent(det.intent, opp.best_intent)
 
     # Genuineness is a fit question, so it zeroes the fit axis rather than being
     # subtracted from a total. A conversation that is not an enquiry is not a
@@ -215,8 +221,6 @@ def _expansion(det: Detection, signals: set[Signal]) -> int:
 def _purchase_intent(intent: Intent, signals: set[Signal], withdrawn: bool) -> int:
     if withdrawn:
         return 3
-    if Signal.CONVERSION in signals:
-        return 40
     if Signal.PURCHASE in signals and intent is Intent.APPLICATION:
         return 37
     if Signal.PURCHASE in signals:
@@ -233,8 +237,6 @@ def _purchase_intent(intent: Intent, signals: set[Signal], withdrawn: bool) -> i
 def _readiness(intent: Intent, signals: set[Signal], text: str, withdrawn: bool) -> int:
     if withdrawn:
         return 3
-    if Signal.CONVERSION in signals:
-        return 30
     documents = any(word in text for word in ("document", "apply", "sign up", "proceed"))
     payment = any(word in text for word in ("pay", "payment"))
     if Signal.PURCHASE in signals:
@@ -345,7 +347,7 @@ def explain(opp: Opportunity, card: Optional[ScoreCard] = None) -> dict:
             },
             "purchase_intent": {
                 "points": card.purchase_intent,
-                "rule": "Intent and active purchase/conversion/withdrawal signals; capped at 40",
+                "rule": "Intent and active purchase/withdrawal signals; unverified conversion reports are excluded; capped at 40",
             },
             "purchase_readiness": {
                 "points": card.purchase_readiness,

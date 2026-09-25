@@ -90,12 +90,11 @@ def transition(
         )
 
     # --- Conversion -------------------------------------------------------
-    # Not from Cold Lead: a first message claiming a completed purchase is far more
-    # likely to be a misread than a real conversion.
-    if Signal.CONVERSION in signals and current is not OpportunityState.COLD_LEAD:
-        return StateTransition(
-            OpportunityState.CLOSED_ACTIVE, "Application or payment completed"
-        )
+    # Conversion is deliberately not inferred from a customer message. A customer
+    # can report that they paid, but only a staff action or trusted order-system
+    # event may move an opportunity into CLOSED_ACTIVE. Detection has no authority
+    # to certify either event, so Signal.CONVERSION is retained as an observation
+    # for context/scoring only.
 
     # --- Cancellation: churn for a customer, a lost lead otherwise --------
     if det.cancellation:
@@ -107,6 +106,13 @@ def transition(
             )
         return StateTransition(
             OpportunityState.DORMANT_LOST, "Cancelled — lead lost"
+        )
+
+    # A current explicit deferral overrides historical readiness in every
+    # non-customer lifecycle state, including High Intent.
+    if det.postponement and current is not OpportunityState.CLOSED_ACTIVE:
+        return StateTransition(
+            OpportunityState.DORMANT_LOST, "Customer deferred the purchase"
         )
 
     if current is OpportunityState.COLD_LEAD:

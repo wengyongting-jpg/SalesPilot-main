@@ -34,9 +34,9 @@ CASES = [
             ("We need medical cover for 85 employees.", {"intent": "corporate_need", "product": "corporate", "signals": ["Expansion: Corporate"]}),
             ("Does the corporate plan include specialist treatment?", {"intent": "coverage", "product": "corporate"}),
             ("Please prepare a quotation; we want to proceed.", {"product": "corporate", "handoff_pending": True, "human_takeover": False, "case_created": False}),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"state": "High Intent", "product": "corporate", "human_takeover": True},
+        "final": {"state": "High Intent", "product": "corporate", "human_takeover": False},
     },
     {
         "id": "supplier_spam",
@@ -65,9 +65,9 @@ CASES = [
             ("I have diabetes and had surgery last year. Can I still buy Plus?", {"intent": "underwriting", "product": "plus", "signals": ["Compliance Risk"]}),
             ("Will you definitely cover my existing condition?", {"intent": "underwriting", "signals": ["Compliance Risk"]}),
             ("I need someone to confirm this before I apply.", {"intent": "human_request", "signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"human_takeover": True, "qualification": "qualified"},
+        "final": {"human_takeover": False, "qualification": "qualified"},
     },
     {
         "id": "explicit_human_request",
@@ -76,9 +76,9 @@ CASES = [
             ("I want information about the Plus plan.", {"product": "plus"}),
             ("The brochure does not answer my question.", {"signals": ["Hesitation"]}),
             ("Please connect me to a human adviser now.", {"intent": "human_request", "signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"human_takeover": True},
+        "final": {"human_takeover": False},
     },
     {
         "id": "discount_negotiation",
@@ -87,9 +87,9 @@ CASES = [
             ("How much is the Family plan for us?", {"intent": "price", "product": "family"}),
             ("Can you give me a 25 percent discount?", {"signals": ["Negotiation"]}),
             ("I will sign today if you match that price.", {"signals": ["Negotiation", "Purchase"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"human_takeover": True},
+        "final": {"human_takeover": False},
     },
     {
         "id": "competitor_high_intent",
@@ -98,9 +98,9 @@ CASES = [
             ("I am comparing your Plus plan with Great Eastern.", {"intent": "comparison", "product": "plus", "signals": ["Competitive"]}),
             ("Their quote is cheaper, but I prefer your coverage.", {"signals": ["Competitive"]}),
             ("The details check out. I want to apply this week.", {"signals": ["Purchase"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"state": "High Intent", "human_takeover": True},
+        "final": {"state": "High Intent", "human_takeover": False},
     },
     {
         "id": "claim_complaint",
@@ -109,9 +109,9 @@ CASES = [
             ("I am already insured. How can I check the status of my claim?", {"intent": "claims"}),
             ("Nobody replies and this service is unacceptable.", {"intent": "complaint"}),
             ("I want a manager to resolve it today.", {"signals": ["Human Request"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"human_takeover": True},
+        "final": {"human_takeover": False},
     },
     {
         "id": "application_completed",
@@ -119,9 +119,41 @@ CASES = [
         "turns": [
             ("I have chosen the Essential plan.", {"product": "essential", "signals": ["Purchase"]}),
             ("Where do I submit my application?", {"intent": "application", "signals": ["Purchase Preparation"]}),
-            ("I submitted and paid successfully.", {"intent": "payment", "signals": ["Conversion"]}),
+            # A customer's report of payment is a signal, not trusted proof of
+            # a completed order. It must not make this opportunity an active customer.
+            ("I submitted and paid successfully.", {"intent": "payment", "handoff_pending": True, "state": "Evaluation & Hesitation"}),
         ],
-        "final": {"state": "Closed / Active Customer", "product": "essential"},
+        "final": {"state": "Evaluation & Hesitation", "product": "essential"},
+    },
+    {
+        "id": "payment_failed_requires_staff",
+        "name": "Maya",
+        "turns": [
+            ("I chose Plus because I need private hospital cover.", {"product": "plus"}),
+            ("I tried to pay, but the payment failed.", {"handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Cancel", {"handoff_pending": False, "human_takeover": False, "case_created": False}),
+        ],
+        "final": {"human_takeover": False},
+    },
+    {
+        "id": "deducted_without_confirmation_requires_staff",
+        "name": "Noah",
+        "turns": [
+            ("I am applying for the Essential plan.", {"product": "essential"}),
+            ("The money was deducted but I did not receive confirmation.", {"handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
+        ],
+        "final": {"human_takeover": False},
+    },
+    {
+        "id": "order_status_requires_staff",
+        "name": "Ethan",
+        "turns": [
+            ("I submitted an application for Plus yesterday.", {"product": "plus"}),
+            ("Can you check my application status?", {"handoff_pending": True, "human_takeover": False, "case_created": False}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
+        ],
+        "final": {"human_takeover": False, "case_status": "Open"},
     },
     {
         "id": "explicit_withdrawal",
@@ -148,11 +180,13 @@ CASES = [
         "name": "Lina",
         "turns": [
             ("I selected Essential and want to apply.", {"intent": "application", "product": "essential", "signals": ["Purchase"]}),
-            ("I have completed payment and the policy is active.", {"intent": "payment", "signals": ["Conversion"]}),
+            # This customer claim is not a trusted order-system event, so it cannot
+            # establish an active-customer precondition for the following request.
+            ("I have completed payment and the policy is active.", {"intent": "payment", "signals": []}),
             ("Now I want to cancel my policy.", {"cancellation": True, "signals": ["Withdrawal"], "handoff_pending": True, "human_takeover": False, "case_created": False}),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"state": "Closed / Active Customer", "human_takeover": True},
+        "final": {"state": "Dormant / Lost", "human_takeover": False},
     },
     {
         "id": "exclusions_and_claims",
@@ -248,9 +282,9 @@ CASES = [
         "final": {"state": "Evaluation & Hesitation", "product": "plus", "qualification": "qualified"},
     },
     {
-        # Corporate need through to price, then a payment question that
-        # trips the corporate-quote escalation even without naming a
-        # quotation explicitly ("how can I pay" + Purchase + Corporate).
+        # A payment-method question is factual, not a purchase commitment.
+        # An explicit corporate quotation request on the next turn is the
+        # actual escalation trigger.
         "id": "corporate_journey_to_escalation",
         "name": "Meridian Logistics",
         "turns": [
@@ -262,13 +296,16 @@ CASES = [
             (
                 "How can I pay for CareSure Corporate?",
                 {
-                    "intent": "application", "product": "corporate", "signals": ["Purchase"],
-                    "handoff_pending": True, "human_takeover": False, "case_created": False,
+                    "intent": "payment", "product": "corporate", "signals": [],
+                    "handoff_pending": False, "human_takeover": False, "case_created": False,
                 },
             ),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            (
+                "Please prepare a corporate quote for our 60 employees.",
+                {"handoff_pending": True, "human_takeover": False, "case_created": False},
+            ),
         ],
-        "final": {"state": "High Intent", "product": "corporate", "human_takeover": True},
+        "final": {"state": "Evaluation & Hesitation", "product": "corporate", "human_takeover": False},
     },
     {
         # A discount request obfuscated with leetspeak must still trip
@@ -281,8 +318,8 @@ CASES = [
                 "can you give me a disc0unt on this pl@n please",
                 {"signals": ["Negotiation"], "handoff_pending": True, "human_takeover": False, "case_created": False},
             ),
-            ("Confirm", {"handoff_pending": False, "human_takeover": True, "case_created": True}),
+            ("Confirm", {"handoff_pending": False, "human_takeover": False, "case_created": True, "case_status": "Open"}),
         ],
-        "final": {"human_takeover": True, "product": "plus"},
+        "final": {"human_takeover": False, "product": "plus"},
     },
 ]

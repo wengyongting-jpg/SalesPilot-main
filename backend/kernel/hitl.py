@@ -26,7 +26,10 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from ..domain.detection import Detection, RetrievalResult
+from ..domain.detection import (
+    BuyingPosture, Detection, EvidenceQuality, RetrievalResult, TransactionIssue,
+)
+from ..domain.decision import Decision, DecisionAction
 from ..domain.enums import Intent, OpportunityState, Product, Qualification, Signal
 
 # Below this retrieval confidence, a specific question about a known product is
@@ -67,6 +70,11 @@ REASON_COMPETITIVE = (
     "intervention"
 )
 REASON_ASSISTANT_PROPOSED = "Assistant proposed handoff"
+REASON_READY_TO_PROCEED = "Customer expressed readiness for sales follow-up"
+REASON_PAYMENT_REPORTED = "Customer-reported payment requires verification"
+REASON_PAYMENT_FAILED = "Payment failure requires staff review"
+REASON_PAYMENT_UNCONFIRMED = "Payment was debited without confirmation"
+REASON_ORDER_STATUS = "Order or application status requires verification"
 
 _CORPORATE_QUOTE_REQUEST = re.compile(
     r"\b(?:prepare|provide|send|issue|request|need|want|get|give|"
@@ -101,6 +109,15 @@ def evaluate(
     # here: held is not ignored.
     if Signal.HUMAN_REQUEST in signals:
         return REASON_HUMAN_REQUEST
+
+    transaction_reasons = {
+        TransactionIssue.PAYMENT_REPORTED: REASON_PAYMENT_REPORTED,
+        TransactionIssue.PAYMENT_FAILED: REASON_PAYMENT_FAILED,
+        TransactionIssue.PAYMENT_UNCONFIRMED: REASON_PAYMENT_UNCONFIRMED,
+        TransactionIssue.ORDER_STATUS: REASON_ORDER_STATUS,
+    }
+    if det.transaction_issue in transaction_reasons:
+        return transaction_reasons[det.transaction_issue]
 
     if det.intent is Intent.COMPLAINT:
         return REASON_COMPLAINT
@@ -157,6 +174,87 @@ def evaluate(
     # Withdrawal is an outcome, not an escalation. Nobody needs to be paged because
     # a customer said no.
     return None
+
+
+def decide(
+    opp,
+    det: Detection,
+    retrieval: RetrievalResult,
+    *,
+    confidence_floor: float = ESCALATE_BELOW_CONFIDENCE,
+    customer_text: str = "",
+    proposal: Optional[Any] = None,
+    customer_message_id: Optional[str] = None,
+) -> Decision:
+    """Return a typed deterministic outcome for service execution.
+
+    `evaluate` remains a compatibility helper for existing kernel clients; the
+    conversation service consumes this object and does not infer actions from prose.
+    """
+    reason = evaluate(
+        opp, det, retrieval, confidence_floor=confidence_floor,
+        customer_text=customer_text, proposal=proposal,
+    )
+    if reason:
+        return Decision(
+            action=DecisionAction.OFFER_HANDOFF,
+            reason_code=_reason_code(reason),
+            reason=reason,
+            restrictions=("withhold_restricted_answer",) if det.restricted else (),
+            evidence_message_ids=(customer_message_id,) if customer_message_id else (),
+        )
+    if det.restricted:
+        return Decision(
+            action=DecisionAction.HOLD_FOR_STAFF,
+            reason_code="restricted_decision",
+            reason="The request is outside the assistant's authority",
+            restrictions=("withhold_restricted_answer",),
+            evidence_message_ids=(customer_message_id,) if customer_message_id else (),
+        )
+    if (
+        det.buying_posture is BuyingPosture.READY_NOW
+        and not any(item.quality is EvidenceQuality.CLEAR for item in det.posture_evidence)
+    ):
+        return Decision(
+            action=DecisionAction.CLARIFY,
+            reason_code="ready_without_referent",
+            reason="Readiness was expressed without a clear next-step referent",
+            evidence_message_ids=tuple(dict.fromkeys(
+                source_id for evidence in det.posture_evidence
+                for source_id in evidence.source_message_ids
+            )),
+        )
+    if det.greeting or det.intent is Intent.GENERIC:
+        return Decision(action=DecisionAction.CLARIFY, reason_code="clarify",
+                        evidence_message_ids=(customer_message_id,) if customer_message_id else ())
+    return Decision(action=DecisionAction.ANSWER, reason_code="answer",
+                    evidence_message_ids=(customer_message_id,) if customer_message_id else ())
+
+
+def _reason_code(reason: str) -> str:
+    if reason == REASON_PAYMENT_REPORTED:
+        return "payment_reported"
+    if reason == REASON_PAYMENT_FAILED:
+        return "payment_failed"
+    if reason == REASON_PAYMENT_UNCONFIRMED:
+        return "payment_unconfirmed"
+    if reason == REASON_ORDER_STATUS:
+        return "order_status"
+    if reason == REASON_HUMAN_REQUEST:
+        return "human_request"
+    if reason == REASON_COMPLAINT:
+        return "complaint"
+    if reason in (REASON_UNDERWRITING, REASON_CANCELLATION):
+        return "restricted_decision"
+    if reason in (REASON_NEGOTIATION, REASON_CORPORATE_QUOTE):
+        return "custom_quote"
+    if reason == REASON_LOW_CONFIDENCE:
+        return "knowledge_gap"
+    if reason == REASON_COMPETITIVE:
+        return "sales_followup"
+    if reason.startswith(REASON_ASSISTANT_PROPOSED):
+        return "assistant_proposal"
+    return "staff_review"
 
 
 def summarise(opp) -> str:

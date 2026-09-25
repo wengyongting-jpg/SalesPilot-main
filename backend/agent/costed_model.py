@@ -7,10 +7,9 @@ from SalesPilot's reviewed table; provider-reported costs always win.
 """
 from __future__ import annotations
 
-from decimal import Decimal
-
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.wrapper import WrapperModel
+from pydantic_ai.exceptions import UsageLimitExceeded
 
 from ..observability import pricing
 
@@ -27,7 +26,13 @@ class CostedGatewayModel(WrapperModel):
                 response.usage.input_tokens,
                 response.usage.output_tokens,
             )
-            if money.pricing_known:
-                response.usage.cost = Decimal(str(money.amount))
+            if money is None:
+                # A configured price is not sufficient if the gateway reports a
+                # different model or omits token usage. Do not let a cost-limited
+                # run continue with an unknown charge.
+                raise UsageLimitExceeded(
+                    f"Cannot price gateway response from model {model_name!r}"
+                )
+            response.usage.cost = money.amount
         return response
 

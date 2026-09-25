@@ -132,11 +132,11 @@ class TestStateMachine(unittest.TestCase):
         self.assertIs(OpportunityState.CLOSED_ACTIVE, result.new_state)
         self.assertTrue(result.set_churn_risk)
 
-    def test_conversion_closes_the_opportunity(self):
+    def test_customer_reported_conversion_does_not_close_the_opportunity(self):
         result = self._move(
             OpportunityState.HIGH_INTENT, Detection(signals=[Signal.CONVERSION])
         )
-        self.assertIs(OpportunityState.CLOSED_ACTIVE, result.new_state)
+        self.assertIs(OpportunityState.HIGH_INTENT, result.new_state)
 
     def test_an_expansion_request_from_an_active_customer_sets_a_flag_not_a_state(self):
         result = self._move(
@@ -204,20 +204,23 @@ class TestTakeoverFreeze(unittest.TestCase):
         self.assertTrue(decision.freeze_state)
         self.assertTrue(decision.preserve_score_floor)
 
-    def test_the_customers_own_lifecycle_decisions_pass_through(self):
-        """Withdrawal and conversion are the customer acting, not the AI selling,
-        so they move the opportunity even while a human owns the case."""
-        for signal in (Signal.WITHDRAWAL, Signal.CONVERSION):
-            with self.subTest(signal.value):
-                decision = self._decide(
-                    opportunity(
-                        state=OpportunityState.HIGH_INTENT, human_takeover=True
-                    ),
-                    Detection(signals=[signal]),
-                )
-                self.assertTrue(decision.active, "takeover itself must remain active")
-                self.assertFalse(decision.freeze_state)
-                self.assertTrue(decision.lifecycle_exception)
+    def test_withdrawal_passes_through_takeover(self):
+        decision = self._decide(
+            opportunity(state=OpportunityState.HIGH_INTENT, human_takeover=True),
+            Detection(signals=[Signal.WITHDRAWAL]),
+        )
+        self.assertTrue(decision.active, "takeover itself must remain active")
+        self.assertFalse(decision.freeze_state)
+        self.assertTrue(decision.lifecycle_exception)
+
+    def test_customer_reported_conversion_does_not_pass_through_takeover(self):
+        decision = self._decide(
+            opportunity(state=OpportunityState.HIGH_INTENT, human_takeover=True),
+            Detection(signals=[Signal.CONVERSION]),
+        )
+        self.assertTrue(decision.active)
+        self.assertTrue(decision.freeze_state)
+        self.assertFalse(decision.lifecycle_exception)
 
     def test_a_decision_always_explains_itself(self):
         decision = self._decide(

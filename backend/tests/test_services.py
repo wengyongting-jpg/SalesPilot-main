@@ -220,6 +220,9 @@ class TestTakeoverFreeze(unittest.TestCase):
         svc = service()
         send(svc, "I want to speak to a human agent")
         send(svc, "Confirm")
+        case = svc.repo.active_case_for("C-1")
+        from backend.services.cases import CaseService
+        CaseService(svc.repo).transition(case.id, CaseStatus.TAKEN_OVER)
         opp = svc.repo.get_opportunity("C-1")
         self.assertTrue(opp.human_takeover, "setup failed: takeover not active")
         return svc, opp
@@ -334,6 +337,9 @@ class TestRepReply(unittest.TestCase):
         svc = service()
         send(svc, "I want to speak to a human agent")
         send(svc, "Confirm")
+        case = svc.repo.active_case_for("C-1")
+        from backend.services.cases import CaseService
+        CaseService(svc.repo).transition(case.id, CaseStatus.TAKEN_OVER)
         return svc
 
     def test_it_is_refused_when_nobody_has_taken_over(self):
@@ -497,6 +503,22 @@ class TestCaseService(unittest.TestCase):
         self.assertFalse(opp.human_takeover)
         self.assertFalse(opp.human_intervention_required)
 
+    def test_reopening_a_taken_over_case_releases_staff_ownership(self):
+        from backend.services.cases import CaseService
+
+        svc = self._confirmed_service()
+        cases = CaseService(svc.repo)
+        case = svc.repo.active_case_for("C-1")
+        cases.transition(case.id, CaseStatus.TAKEN_OVER)
+        self.assertTrue(svc.repo.get_opportunity("C-1").human_takeover)
+
+        reopened = cases.transition(case.id, CaseStatus.OPEN)
+
+        opp = svc.repo.get_opportunity("C-1")
+        self.assertIs(CaseStatus.OPEN, reopened.status)
+        self.assertFalse(opp.human_takeover)
+        self.assertTrue(opp.human_intervention_required)
+
     def test_taking_over_preserves_the_reason_a_person_was_needed(self):
         """`human_intervention_required` records that a person was *needed*, which
         taking the case over does not change. Clearing it would lose why it opened."""
@@ -567,7 +589,7 @@ class TestPersistenceAcrossARestart(unittest.TestCase):
         self.assertIsNotNone(svc.repo.get_opportunity("C-1").pending_handoff_reason)
         result = send(svc, "Confirm", key="confirm")
         self.assertIsNotNone(svc.repo.active_case_for("C-1"))
-        self.assertTrue(result.opportunity.human_takeover)
+        self.assertFalse(result.opportunity.human_takeover)
         svc.repo.close()
 
     def test_handoff_cancellation_survives_a_restart(self):
@@ -696,13 +718,108 @@ class TestHandoffConfirmation(unittest.TestCase):
         self.assertIsNone(svc.repo.active_case_for("C-1"))
         self.assertEqual([], svc.repo.list_cases())
 
+    def test_readiness_reply_uses_typed_prompt_and_confirmation_creates_one_case(self):
+        svc = service()
+        send(svc, "I want Plus coverage.")
+        first = send(svc, "I have chosen Plus and want to apply today.", key="ready-1")
+        invitation = first.opportunity.pending_action
+        self.assertEqual("ready_now", first.opportunity.buying_posture.value)
+        self.assertEqual("readiness_invitation", invitation.kind.value)
+        self.assertEqual("pending", invitation.status.value)
+        self.assertEqual(first.reply.id, invitation.originating_assistant_message_id)
+        self.assertEqual(
+            first.opportunity.messages[-2].id,
+            invitation.originating_customer_message_id,
+        )
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+
+        offer = send(svc, "yes im ready", key="ready-2")
+        pending = offer.opportunity.pending_action
+        self.assertEqual("handoff", pending.kind.value)
+        self.assertEqual("pending", pending.status.value)
+        self.assertEqual(offer.reply.id, pending.originating_assistant_message_id)
+        self.assertIn("confirm", offer.reply.text.lower())
+        self.assertIn("cancel", offer.reply.text.lower())
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+
+        confirmed = send(svc, "Confirm", key="ready-3")
+        self.assertIsNotNone(svc.repo.active_case_for("C-1"))
+        self.assertEqual("confirmed", confirmed.opportunity.pending_action.status.value)
+        replay = send(svc, "Confirm", key="ready-3")
+        self.assertTrue(replay.replayed)
+        self.assertEqual(1, len(svc.repo.list_cases()))
+
+    def test_unanchored_affirmative_does_not_create_a_case(self):
+        svc = service()
+        result = send(svc, "yes im ready")
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+        self.assertIn("what would you like help with next", result.reply.text.lower())
+
+    def test_later_deferral_cancels_readiness_invitation(self):
+        svc = service()
+        send(svc, "I want Plus coverage.")
+        send(svc, "I have chosen Plus and want to apply today.")
+        result = send(svc, "Actually, leave this until next quarter.")
+        self.assertEqual("deferred", result.opportunity.buying_posture.value)
+        self.assertEqual("cancelled", result.opportunity.pending_action.status.value)
+        self.assertIsNone(result.opportunity.pending_handoff_reason)
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+
+    def test_declining_readiness_invitation_cancels_without_reoffering(self):
+        svc = service()
+        send(svc, "I want Plus coverage.")
+        invitation = send(svc, "I have chosen Plus and want to apply today.")
+        self.assertEqual("readiness_invitation", invitation.opportunity.pending_action.kind.value)
+
+        declined = send(svc, "No")
+        self.assertEqual("cancelled", declined.opportunity.pending_action.status.value)
+        self.assertIn("won't ask you to confirm", declined.reply.text.lower())
+        self.assertNotIn("reply i'm ready", declined.reply.text.lower())
+        self.assertFalse(any(chip.id == "handoff_confirm" for chip in declined.quick_replies))
+
+        followup = send(svc, "yes")
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+        self.assertNotEqual("handoff", followup.opportunity.pending_action.kind.value)
+        self.assertIn("what would you like help with next", followup.reply.text.lower())
+
+    def test_unanchored_readiness_affirmative_does_not_store_hidden_invitation(self):
+        svc = service()
+        send(svc, "I want Plus coverage.")
+        send(svc, "I have chosen Plus and want to apply today.")
+        opp = svc.repo.get_opportunity("C-1")
+        opp.pending_action = None
+        opp.pending_handoff_reason = None
+        svc.repo.upsert_opportunity(opp)
+        self.assertEqual("High Intent", opp.state.value)
+
+        result = send(svc, "yes im ready")
+        self.assertIn("what would you like help with next", result.reply.text.lower())
+        self.assertIsNone(result.opportunity.pending_action)
+
+        next_yes = send(svc, "yes")
+        self.assertIsNone(svc.repo.active_case_for("C-1"))
+        self.assertIsNone(next_yes.opportunity.pending_action)
+        self.assertIn("what would you like help with next", next_yes.reply.text.lower())
+
+    def test_customer_reported_payment_does_not_mark_conversion(self):
+        svc = service()
+        send(svc, "I have chosen the Essential plan.")
+        send(svc, "Where do I submit my application?")
+        before = svc.repo.get_opportunity("C-1").state
+
+        result = send(svc, "I submitted and paid successfully.")
+
+        self.assertIsNot(before, OpportunityState.CLOSED_ACTIVE)
+        self.assertIsNot(result.opportunity.state, OpportunityState.CLOSED_ACTIVE)
+
     def test_confirmation_prompt_is_returned(self):
         """After escalation, the system returns a confirmation prompt."""
         svc = service()
         result = send(svc, "I want to speak to a human agent")
 
         # Should return confirmation prompt
-        self.assertIn("notify", result.reply.text.lower())
+        self.assertIn("representative", result.reply.text.lower())
+        self.assertIn("submit", result.reply.text.lower())
         self.assertIn("confirm", result.reply.text.lower())
         self.assertIn("cancel", result.reply.text.lower())
         # Should provide quick reply buttons
@@ -722,9 +839,10 @@ class TestHandoffConfirmation(unittest.TestCase):
         # Reason should contain customer's request
         self.assertTrue(len(case.reason) > 0)
 
-        # Opportunity should be under takeover
+        # The open case is queued; staff ownership begins on explicit claim.
         opp = svc.repo.get_opportunity("C-1")
-        self.assertTrue(opp.human_takeover)
+        self.assertFalse(opp.human_takeover)
+        self.assertTrue(opp.human_intervention_required)
         self.assertIsNone(opp.pending_handoff_reason)
 
         # Reply should confirm handoff
@@ -802,7 +920,8 @@ class TestHandoffConfirmation(unittest.TestCase):
         # Case should be created
         self.assertIsNotNone(svc.repo.active_case_for("C-1"))
         opp = svc.repo.get_opportunity("C-1")
-        self.assertTrue(opp.human_takeover)
+        self.assertFalse(opp.human_takeover)
+        self.assertTrue(opp.human_intervention_required)
 
     def test_chinese_cancel_works(self):
         """Chinese cancellation keywords work correctly."""

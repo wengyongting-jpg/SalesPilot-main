@@ -108,6 +108,10 @@ class TestModelBackedPath(_Quiet):
             self.assertEqual(result.run.degraded_reasons, [])
             self.assertGreaterEqual(result.run.totals()["llm_call_count"], 2)
             self.assertEqual(result.extraction_source, "llm")
+            self.assertIn(
+                "response_generation",
+                {call.purpose for call in result.run.llm_calls},
+            )
 
         business = [m for m in service.repo.get_opportunity("C-1").messages if not m.is_from_customer]
         self.assertTrue(all(m.generation is Generation.LLM for m in business))

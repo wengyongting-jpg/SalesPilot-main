@@ -33,8 +33,11 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
 from ... import config
-from ...domain.detection import Detection
-from ...domain.enums import Intent
+from ..budget import for_turn
+from ...domain.detection import (
+    Detection, EvidenceQuality, ObservationEvidence, TransactionIssue,
+)
+from ...domain.enums import Intent, Signal
 from ...domain.message import Message
 from ...domain.conversation_memory import ConversationMemory, MemoryFact
 from ...knowledge import loader
@@ -53,6 +56,7 @@ from ..tools import (
 )
 from ..tools.questions import propose_customer_question
 from . import rules
+from .rules import intent as intent_rules
 
 # Intents where the rule-based phrase match is reliable enough that it
 # should win over the model's own read when the two disagree: the three
@@ -180,11 +184,20 @@ def extract(
                 purpose="extraction",
                 finished_at=datetime.now(timezone.utc),
             )
-        output = result.output
-        if tool_context.history_errors:
-            step.degrade("; ".join(tool_context.history_errors))
-        else:
-            step.note(f"intent={output.intent.value} product={output.product.value}")
+    output = result.output
+    if tool_context.history_errors:
+        step.degrade("; ".join(tool_context.history_errors))
+    else:
+        step.note(f"intent={output.intent.value} product={output.product.value}")
+    if (
+        rule_based.buying_posture.value != "unknown"
+        and output.buying_posture.value != "unknown"
+        and rule_based.buying_posture is not output.buying_posture
+    ):
+        step.degrade(
+            "buying-posture disagreement between model and rule observation; "
+            "model evidence retained for deterministic policy review"
+        )
 
     merged_signals = list(output.signals)
     for signal in rule_based.signals:
@@ -194,6 +207,12 @@ def extract(
     intent = output.intent
     if rule_based.intent in _ESCALATION_CRITICAL_INTENTS:
         intent = rule_based.intent
+    elif intent_rules.is_payment_method_question(text):
+        # The customer is asking for payment information, not initiating a
+        # purchase. Keep the factual retrieval topic stable even when the
+        # model confuses "how can I pay" with application readiness.
+        intent = Intent.PAYMENT
+        merged_signals = [s for s in merged_signals if s is not Signal.PURCHASE]
 
     detection = Detection(
         intent=intent,
@@ -203,6 +222,33 @@ def extract(
         restricted=output.restricted,
         cancellation=output.cancellation,
         postponement=output.postponement,
+        buying_posture=output.buying_posture,
+        posture_evidence=(
+            [
+                ObservationEvidence(
+                    span=output.posture_evidence,
+                    quality=output.posture_evidence_quality,
+                )
+            ]
+            if output.posture_evidence else []
+        ),
+        transaction_issue=(
+            rule_based.transaction_issue
+            if rule_based.transaction_issue is not TransactionIssue.NONE
+            else output.transaction_issue
+        ),
+        transaction_evidence=(
+            rule_based.transaction_evidence
+            if rule_based.transaction_issue is not TransactionIssue.NONE
+            else (
+                [ObservationEvidence(
+                    span=output.transaction_evidence,
+                    quality=output.transaction_evidence_quality,
+                )]
+                if output.transaction_evidence and output.transaction_issue is not TransactionIssue.NONE
+                else []
+            )
+        ),
         # The rule-based solicitation marker is deliberately conservative
         # (`rules.signals.is_solicitation`'s own docstring: it only fires
         # when the message shows no interest in being insured), so when it
@@ -477,21 +523,7 @@ def _model_violation(exc: UnexpectedModelBehavior) -> ModelViolation:
 def _usage_limits(recorder: Optional[RunRecorder] = None) -> UsageLimits:
     # `docs/v0.0/backend/backend-plan.md` §12.3: a runaway tool loop is quadratic in the
     # number of tool calls, so it is capped before it can cost anything.
-    steps = config.LLM_MAX_TOOL_STEPS
-    spent_tokens = sum(call.total_tokens for call in recorder.llm_calls) if recorder else 0
-    spent_requests = len(recorder.llm_calls) if recorder else 0
-    remaining_tokens = max(1, config.LLM_TOTAL_TOKEN_LIMIT - spent_tokens)
-    remaining_cost = config.LLM_COST_LIMIT_USD
-    if recorder:
-        remaining_cost = max(
-            Decimal("0.000001"), remaining_cost - _known_cost_spent(recorder)
-        )
-    return UsageLimits(
-        request_limit=max(1, config.LLM_REQUEST_LIMIT - spent_requests),
-        tool_calls_limit=steps,
-        total_tokens_limit=remaining_tokens,
-        output_tokens_limit=config.LLM_OUTPUT_TOKEN_LIMIT,
-        per_request_input_tokens_limit=config.LLM_PER_REQUEST_INPUT_TOKEN_LIMIT,
-        cost_limit=remaining_cost,
-        count_tokens_before_request=False,
-    )
+    budget = for_turn(recorder, allow_tools=True)
+    if budget.limits is None:
+        raise telemetry.UsageLimitExceeded(budget.reason or "turn model budget exhausted")
+    return budget.limits

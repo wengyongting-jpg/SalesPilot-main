@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from ..domain.decision import NextBestAction
 from ..domain.detection import Detection
+from ..domain.detection import BuyingPosture
 from ..domain.enums import (
     OpportunityState,
     Priority,
@@ -70,6 +71,15 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
             human_intervention_required=True,
         )
 
+    if opp.buying_posture in {BuyingPosture.DEFERRED, BuyingPosture.DECLINED}:
+        return NextBestAction(
+            action="Pause sales follow-up until the customer re-engages",
+            reason=f"Current buying posture is {opp.buying_posture.value}",
+            priority=priority,
+            reply_mode=ReplyMode.MAINTAIN,
+            human_intervention_required=False,
+        )
+
     # A bare greeting with no other content is not a request for information: the
     # customer has not asked anything or stated a need yet, so answering with the
     # product catalogue (the ANSWER/NURTURE default for "no need identified")
@@ -87,6 +97,19 @@ def recommend(opp, det: Detection, *, escalated: bool = False) -> NextBestAction
     # ---- State rules -----------------------------------------------------
 
     if opp.state is OpportunityState.HIGH_INTENT:
+        if opp.buying_posture in {
+            BuyingPosture.BROWSING, BuyingPosture.EVALUATING, BuyingPosture.CONDITIONAL,
+        }:
+            return NextBestAction(
+                action="Answer the customer's current question without a sales push",
+                reason=f"Current buying posture is {opp.buying_posture.value}",
+                priority=priority,
+                reply_mode=(
+                    ReplyMode.ANSWER if opp.buying_posture is BuyingPosture.BROWSING
+                    else ReplyMode.ADDRESS_CONCERN
+                ),
+                human_intervention_required=False,
+            )
         if Signal.COMPETITIVE in signals or opp.competitive_risk:
             return NextBestAction(
                 action="Human sales intervention: address the competitive risk",

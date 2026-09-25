@@ -74,9 +74,8 @@ export function createTranscript({ headerEl, transcriptEl, onRetry, onViewCase }
         ? `${strings.origin.human} · ${message.repName}`
         : strings.origin[message.origin] ?? message.origin;
 
-    // `generation` says whether a model produced the wording. A template reply
-    // involved none, and an operator must not be left to assume otherwise — the
-    // same reason the customer-facing assistant is always labelled as AI.
+    // `generation` records model participation, not prose authorship. The model
+    // may select approved facts while a deterministic template writes the reply.
     const generationBadge =
       message.generation && message.generation !== 'human'
         ? badge(
@@ -84,7 +83,7 @@ export function createTranscript({ headerEl, transcriptEl, onRetry, onViewCase }
             message.generation === 'llm' ? 'badge--info' : 'badge--neutral',
             message.generation === 'template'
               ? strings.generation.templateNote
-              : undefined
+              : strings.generation.llmNote
           )
         : null;
 

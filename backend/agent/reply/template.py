@@ -35,63 +35,113 @@ def ensure_premium_disclaimer(text: str, disclaimer: str) -> tuple[str, bool]:
         return f"{text}\n\n{disclaimer}", True
     return text, False
 
-_OPENERS: dict[ReplyMode, str] = {
-    ReplyMode.ANSWER: "Here's what I can confirm{name}:",
-    ReplyMode.NURTURE: "Happy to help{name}. Here's a quick overview:",
-    ReplyMode.ADDRESS_CONCERN: (
-        "That's a fair thing to weigh up{name}. Here are the facts as they stand:"
-    ),
-    ReplyMode.CLOSE: "Of course{name}. Here's what applies:",
-    ReplyMode.MAINTAIN: "Thanks for getting in touch{name}. Here's the position:",
-}
-
-_CLOSERS: dict[ReplyMode, str] = {
-    ReplyMode.ANSWER: "Anything else you'd like me to check?",
-    ReplyMode.NURTURE: "Which of these sounds closest to what you need?",
-    ReplyMode.ADDRESS_CONCERN: (
-        "Take whatever time you need — I'm happy to go through any of it again."
-    ),
-    ReplyMode.CLOSE: (
-        "A CareSure representative can take you through the next steps whenever "
-        "you're ready."
-    ),
-    ReplyMode.MAINTAIN: "Let me know if there's anything else about your policy.",
-}
+_READINESS_INVITATION = (
+    "If you'd like a representative to help with the next step, reply 'I'm ready'. "
+    "I'll ask you to confirm before notifying the team."
+)
 
 # Modes where the assistant does not sell. No facts, no figures, no next step.
 _STANDALONE: dict[ReplyMode, str] = {
     ReplyMode.HANDOVER: (
-        "Thanks{name} — a CareSure representative is picking this up and will be in "
-        "touch with you directly. I'll leave it with them from here."
+        "A CareSure representative is handling this conversation. "
+        "I'll leave the details with them."
     ),
     ReplyMode.WITHDRAWN: (
-        "Understood{name}, and thanks for letting me know. If anything changes, "
+        "Understood. If anything changes, "
         "we're here whenever you want to pick it up again."
     ),
     ReplyMode.HOLD: (
-        "Thanks for your message{name}. A colleague will review it and come back to "
-        "you if we can help."
+        "I can't take this request further "
+        "automatically, but I can still help with general plan information."
     ),
     ReplyMode.GREETING: (
-        "Hello{name}! I'm CareSure's assistant — what can I help you with today?"
+        "Hello! I'm CareSure's AI assistant — what can I help you with today?"
     ),
 }
 
-_AI_NOTE = "(You're chatting with CareSure's AI assistant.)"
+_TEMPLATE_VARIANTS: dict[ReplyMode, dict[str, tuple[str, str]]] = {
+    ReplyMode.ANSWER: {
+        "answer_direct": ("", ""),
+        "answer_detail": ("Here are the relevant details:", ""),
+        "answer_open": ("", "Would you like me to clarify a specific part?"),
+    },
+    ReplyMode.NURTURE: {
+        "nurture_direct": ("", ""),
+        "nurture_detail": ("Here are the relevant details:", ""),
+        "nurture_open": ("", "Which part would you like to explore?"),
+    },
+    ReplyMode.ADDRESS_CONCERN: {
+        "concern_direct": ("", ""),
+        "concern_detail": ("Here is the information I can confirm:", ""),
+        "concern_open": ("", "Is there a specific part you would like clarified?"),
+    },
+}
+_ACKNOWLEDGEMENTS = {"none": ""}
 
 
 class TemplateComposer:
     """Assembles a reply from approved facts and fixed wording."""
 
+    @staticmethod
+    def template_ids_for(mode: ReplyMode) -> set[str]:
+        return set(_TEMPLATE_VARIANTS.get(mode, {}))
+
+    @staticmethod
+    def template_descriptions_for(mode: ReplyMode) -> dict[str, str]:
+        descriptions = {
+            "answer_direct": "give the selected facts directly, without filler",
+            "answer_detail": "introduce requested detail, then give the selected facts",
+            "answer_open": "give the facts, then invite one specific clarification",
+            "nurture_direct": "give the selected facts directly, without filler",
+            "nurture_detail": "introduce requested detail, then give the selected facts",
+            "nurture_open": "give the facts, then ask which part matters most",
+            "concern_direct": "address the concern with the selected facts only",
+            "concern_detail": "introduce confirmed detail, then give the facts",
+            "concern_open": "give the facts, then offer one specific clarification",
+        }
+        return {
+            template_id: descriptions[template_id]
+            for template_id in _TEMPLATE_VARIANTS.get(mode, {})
+        }
+
+    @staticmethod
+    def acknowledgement_ids() -> set[str]:
+        return set(_ACKNOWLEDGEMENTS)
+
     def compose(self, request: ReplyRequest) -> ReplyOutcome:
         mode = request.action.reply_mode
-        name = f" {request.customer_name}" if request.customer_name else ""
 
         standalone = _STANDALONE.get(mode)
         if standalone is not None:
-            return self._outcome(standalone.format(name=name), request)
+            return self._outcome(standalone, request, displayed_facts=[])
 
-        lines = [_OPENERS.get(mode, _OPENERS[ReplyMode.ANSWER]).format(name=name)]
+        if mode is ReplyMode.CLOSE and not request.facts:
+            return self._outcome(
+                "I can help arrange the next step with a representative. "
+                "Reply 'I'm ready' and I'll ask you to confirm before notifying the team.",
+                request,
+            )
+
+        opener, closer = _TEMPLATE_VARIANTS.get(mode, {}).get(
+            request.template_id or "", ("", "")
+        )
+        if mode is ReplyMode.CLOSE:
+            opener, closer = "", _READINESS_INVITATION
+        # Reusing a transition phrase is more conspicuous than omitting it.
+        # Prior assistant messages are context, not sources for product claims.
+        recent_business = [
+            message.text for message in (request.history or [])[-6:]
+            if not getattr(message, "is_from_customer", False)
+        ]
+        if opener and any(opener in previous for previous in recent_business):
+            opener = ""
+        if closer and mode is not ReplyMode.CLOSE and any(
+            closer in previous for previous in recent_business
+        ):
+            closer = ""
+        lines = []
+        if opener:
+            lines.append(opener)
         if request.facts:
             # No "- " bullet prefix: each fact is a complete sentence already,
             # and the frontend renders each newline-separated line as its own
@@ -102,16 +152,22 @@ class TemplateComposer:
             # No grounded fact to offer. Say so rather than improvising, so the gap
             # is visible instead of being filled with something plausible.
             lines.append(
-                "I don't have a confirmed answer to hand, so I'd rather not guess."
+                "I can't confirm that from the information I have."
             )
-        lines.append(_CLOSERS.get(mode, _CLOSERS[ReplyMode.ANSWER]))
+        if closer and request.facts:
+            lines.append(closer)
         return self._outcome("\n".join(lines), request)
 
-    def _outcome(self, text: str, request: ReplyRequest) -> ReplyOutcome:
+    def _outcome(
+        self, text: str, request: ReplyRequest, *, displayed_facts: list[str] | None = None
+    ) -> ReplyOutcome:
         text, _ = ensure_premium_disclaimer(text, request.disclaimer)
         return ReplyOutcome(
             text=text,
             generation=Generation.TEMPLATE,
+            displayed_facts=(
+                list(request.facts) if displayed_facts is None else displayed_facts
+            ),
             degraded=True,
             # Expected whenever this peer is the configured one. A model failing over
             # to it is a different matter, and `ModelComposer` reports that as a fault.

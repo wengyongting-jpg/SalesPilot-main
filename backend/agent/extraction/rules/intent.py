@@ -11,7 +11,31 @@ a model was configured.
 """
 from __future__ import annotations
 
+import re
+
 from ....domain.enums import Intent
+
+_PAYMENT_METHOD_QUESTION = re.compile(
+    r"\b(?:how\s+(?:can|do)\s+i\s+pay|how\s+to\s+pay|"
+    r"can\s+i\s+pay\s+(?:by|with|monthly|annually)|"
+    r"what\s+(?:are\s+the\s+)?payment\s+methods?)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PURCHASE_COMMITMENT = re.compile(
+    r"\b(?:(?:i|we)\s+(?:want|plan|intend|will)\s+to\s+"
+    r"(?:buy|purchase|apply|proceed)|"
+    r"(?:i'm|i am|we're|we are)\s+ready\s+to\s+"
+    r"(?:buy|purchase|apply|proceed|pay)|"
+    r"please\s+(?:proceed|sign\s+me\s+up)|let's\s+proceed)\b",
+    re.IGNORECASE,
+)
+
+
+def is_payment_method_question(text: str) -> bool:
+    """A factual payment enquiry, not a commitment to start a transaction."""
+    return bool(_PAYMENT_METHOD_QUESTION.search(text)) and not bool(
+        _EXPLICIT_PURCHASE_COMMITMENT.search(text)
+    )
 
 _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
     (Intent.HUMAN_REQUEST, (
@@ -37,8 +61,8 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
         "how do i apply", "i want to buy", "want to buy", "apply", "sign up",
         "enrol", "enroll", "register", "documents do i need", "documents i need",
         "proceed with", "want to proceed", "ready to get", "take up the plan",
-        "buy the plan", "purchase the plan", "how can i pay",
-        "when can the policy start", "how to pay", "policy start",
+        "buy the plan", "purchase the plan",
+        "when can the policy start", "policy start",
         "submit my application", "where do i submit", "what are the steps",
     )),
     (Intent.COMPARISON, (
@@ -72,7 +96,8 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
     )),
     (Intent.PAYMENT, (
         "medisave", "pay by", "payment method", "monthly", "instalment",
-        "how to pay", "cash", "paid successfully", "submitted and paid",
+        "how can i pay", "how do i pay", "how to pay", "cash",
+        "paid successfully", "submitted and paid",
         "completed payment", "completed the payment",
     )),
     (Intent.PRICE, (
@@ -146,6 +171,10 @@ _APPLICATION_FALSE_POSITIVES = (
 def detect(text: str, context: list | None = None) -> Intent:
     normalised = f" {text.lower().strip()} "
     for intent, phrases in _PHRASES:
+        # Keep the higher-priority human/complaint/underwriting boundaries,
+        # then distinguish a factual payment question from an application.
+        if intent is Intent.APPLICATION and is_payment_method_question(text):
+            return Intent.PAYMENT
         if intent is Intent.APPLICATION and any(
             fp in normalised for fp in _APPLICATION_FALSE_POSITIVES
         ):

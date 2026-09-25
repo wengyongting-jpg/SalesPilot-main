@@ -133,7 +133,10 @@ class KnowledgeRetriever:
             matched_tokens.update(overlap_tokens)
             return len(overlap_tokens)
 
-        facts.append(f"**{product_data['name']}**: {product_data['positioning']}")
+        # A payment-method question needs the payment terms, not another
+        # marketing overview of a plan the customer is already discussing.
+        if intent is not Intent.PAYMENT:
+            facts.append(f"**{product_data['name']}**: {product_data['positioning']}")
 
         for field_name in preferred:
             if field_name in product_data and field_name != "positioning":

@@ -345,10 +345,11 @@ export const strings = {
 
   generation: {
     label: 'Wording',
-    llm: 'Model',
+    llm: 'Model-assisted',
     template: 'Template',
     human: 'Representative',
     // The compliance point: a template reply involved no model at all.
     templateNote: 'Composed from a template; no model produced the wording.',
+    llmNote: 'The model selected approved facts; the wording comes from a template.',
   },
 };

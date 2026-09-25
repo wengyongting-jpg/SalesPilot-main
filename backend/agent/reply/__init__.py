@@ -37,6 +37,16 @@ class ReplyRequest:
     # The observing segment's message history, so the composing segment continues
     # one conversation instead of starting a second one.
     history: Optional[list] = None
+    # Sourced recall notes help interpret references when the transcript is long.
+    # They are explicitly unverified and may never be used as product/order facts.
+    memory: Optional[dict] = None
+    # Model selections are identifiers from a mode-specific allowlist. The renderer
+    # ignores any value outside that allowlist and uses the deterministic default.
+    template_id: Optional[str] = None
+    acknowledgement_id: str = "none"
+    usage_limits: object = None
+    model_allowed: bool = True
+    model_budget_reason: Optional[str] = None
     # False for a pre-curated enumeration (e.g. "what plans are there?" - one
     # short line per product, already trimmed to what's worth showing) where
     # every fact belongs in the answer. Model-based fact selection exists to
@@ -50,6 +60,9 @@ class ReplyRequest:
 class ReplyOutcome:
     text: str
     generation: Generation
+    # The approved facts actually rendered in this reply. Retrieval can offer
+    # more than the model selects, and fixed/standalone replies show none.
+    displayed_facts: list[str] = field(default_factory=list)
     degraded: bool = False
     degradation_reason: Optional[str] = None
     violations: list[ModelViolation] = field(default_factory=list)

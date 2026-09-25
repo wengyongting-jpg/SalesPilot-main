@@ -25,6 +25,8 @@ from .enums import (
     Qualification,
     Signal,
 )
+from .decision import PendingAction
+from .detection import BuyingPosture, ObservationEvidence
 from .message import Message
 
 
@@ -169,6 +171,9 @@ class Opportunity:
     # A proposed handoff is not a case. It becomes one only after the customer
     # explicitly confirms, including when the trigger came from a model tool.
     pending_handoff_reason: Optional[str] = None
+    pending_action: Optional[PendingAction] = None
+    buying_posture: BuyingPosture = BuyingPosture.UNKNOWN
+    posture_evidence: list[ObservationEvidence] = field(default_factory=list)
     pending_question_field: Optional[str] = None
     collected_answers: dict[str, str] = field(default_factory=dict)
     evidence_sources: dict[str, str] = field(default_factory=dict)

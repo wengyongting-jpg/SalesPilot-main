@@ -56,20 +56,23 @@ class SqliteRepository(Repository):
             """
             INSERT INTO opportunities
                 (id, customer_name, state, product, priority, qualification,
-                 human_takeover, created_at, updated_at, payload)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 human_takeover, created_at, updated_at, pending_action, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 customer_name=excluded.customer_name, state=excluded.state,
                 product=excluded.product, priority=excluded.priority,
                 qualification=excluded.qualification,
                 human_takeover=excluded.human_takeover,
-                updated_at=excluded.updated_at, payload=excluded.payload
+                updated_at=excluded.updated_at, pending_action=excluded.pending_action,
+                payload=excluded.payload
             """,
             (
                 opp.id, opp.customer_name, opp.state.value, opp.product.value,
                 opp.priority.value if opp.priority else None, opp.qualification.value,
                 int(opp.human_takeover), opp.created_at.isoformat(),
-                opp.updated_at.isoformat(), _dumps(payload),
+                opp.updated_at.isoformat(),
+                _dumps(payload["pending_action"]) if payload.get("pending_action") else None,
+                _dumps(payload),
             ),
         )
 

@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.domain.case import HumanCase
+from backend.domain.detection import BuyingPosture, EvidenceQuality, ObservationEvidence
 from backend.domain.enums import (
     CaseStatus,
     Intent,
@@ -87,11 +88,24 @@ class RepositoryContract:
         loaded = self.repo.get_opportunity("C-1")
         self.assertEqual(codec.opportunity_to_dict(loaded), codec.opportunity_to_dict(original))
 
+    def test_current_posture_and_evidence_round_trip(self):
+        original = _opportunity()
+        original.buying_posture = BuyingPosture.DEFERRED
+        original.posture_evidence = [ObservationEvidence(
+            source_message_ids=[original.messages[0].id],
+            span="next quarter",
+            quality=EvidenceQuality.CLEAR,
+        )]
+        self.repo.upsert_opportunity(original)
+        loaded = self.repo.get_opportunity("C-1")
+        self.assertIs(BuyingPosture.DEFERRED, loaded.buying_posture)
+        self.assertEqual(original.posture_evidence, loaded.posture_evidence)
+
     def test_older_opportunity_payload_defaults_new_persistence_fields(self):
         payload = codec.opportunity_to_dict(_opportunity())
         for key in (
             "pending_handoff_reason", "pending_question_field", "collected_answers",
-            "evidence_sources",
+            "evidence_sources", "pending_action", "buying_posture", "posture_evidence",
         ):
             payload.pop(key)
         for entry in payload["score_history"]:
@@ -249,6 +263,12 @@ class TestSqliteSurvivesRestart(unittest.TestCase):
             try:
                 loaded = second.get_opportunity("C-1")
                 self.assertEqual("needs a representative", loaded.pending_handoff_reason)
+                self.assertEqual("handoff", loaded.pending_action.kind.value)
+                self.assertEqual("pending", loaded.pending_action.status.value)
+                stored_action = second._conn.execute(
+                    "SELECT pending_action FROM opportunities WHERE id = ?", ("C-1",)
+                ).fetchone()[0]
+                self.assertIn('"kind": "handoff"', stored_action)
                 self.assertEqual("budget", loaded.pending_question_field)
                 self.assertEqual({"budget": "1000"}, loaded.collected_answers)
                 self.assertEqual({"budget": "customer message"}, loaded.evidence_sources)
@@ -307,7 +327,7 @@ class TestSqliteSurvivesRestart(unittest.TestCase):
             repo = SqliteRepository(path)
             try:
                 versions = [r[0] for r in repo._conn.execute("SELECT version FROM schema_version")]
-                self.assertEqual(versions, [1, 2])
+                self.assertEqual(versions, [1, 2, 3])
             finally:
                 repo.close()
 

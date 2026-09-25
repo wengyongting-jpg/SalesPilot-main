@@ -87,7 +87,7 @@ _PHRASES: list[tuple[Signal, tuple[str, ...]]] = [
         "how do i apply", "apply", "sign up", "enrol", "enroll", "register",
         "documents do i need", "documents i need", "buy", "purchase",
         "proceed with", "want to proceed", "ready to get", "take up",
-        "how can i pay", "when can the policy start", "how to pay",
+        "when can the policy start",
         "want to start this week", "i have chosen", "i've chosen",
         "chosen the plan", "i will sign", "sign today",
     )),

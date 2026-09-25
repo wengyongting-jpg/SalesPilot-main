@@ -24,6 +24,12 @@ PRICES_USD_PER_MILLION: dict[str, tuple[Decimal, Decimal]] = {
     "gpt-4o": (Decimal("2.50"), Decimal("10.00")),
     "gpt-4.1-mini": (Decimal("0.40"), Decimal("1.60")),
     "gpt-4.1": (Decimal("2.00"), Decimal("8.00")),
+    # Anthropic's published standard list price for Sonnet 4.5 global
+    # cross-region inference (USD per million input/output tokens; <=200K
+    # context). This project caps prompts far below that context tier.
+    "global.anthropic.claude-sonnet-4-5": (Decimal("3.00"), Decimal("15.00")),
+    "anthropic.claude-sonnet-4-5": (Decimal("3.00"), Decimal("15.00")),
+    "claude-sonnet-4-5": (Decimal("3.00"), Decimal("15.00")),
 }
 
 _MILLION = Decimal(1_000_000)

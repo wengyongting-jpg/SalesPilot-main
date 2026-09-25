@@ -20,7 +20,9 @@ from typing import Optional
 
 from pydantic_ai import Agent
 from pydantic import BaseModel, Field
+from pydantic_ai.usage import UsageLimits
 
+from ... import config
 from ...domain.enums import Generation
 from .. import policy
 from ..usage import from_result
@@ -30,6 +32,10 @@ from .template import TemplateComposer
 
 class FactSelection(BaseModel):
     fact_indices: list[int] = Field(default_factory=list)
+    template_id: str = Field(default="", description="One permitted reply template ID")
+    acknowledgement_id: str = Field(
+        default="none", description="One permitted short acknowledgement ID"
+    )
 
 
 class ModelComposer:
@@ -42,7 +48,15 @@ class ModelComposer:
     ) -> None:
         self.model = model
         self.fallback = fallback or TemplateComposer()
-        self.usage_limits = usage_limits
+        self.usage_limits = usage_limits or UsageLimits(
+            request_limit=1,
+            tool_calls_limit=0,
+            total_tokens_limit=config.LLM_TOTAL_TOKEN_LIMIT,
+            output_tokens_limit=config.LLM_OUTPUT_TOKEN_LIMIT,
+            per_request_input_tokens_limit=config.LLM_PER_REQUEST_INPUT_TOKEN_LIMIT,
+            cost_limit=config.LLM_COST_LIMIT_USD,
+            count_tokens_before_request=False,
+        )
 
     def compose(self, request: ReplyRequest) -> ReplyOutcome:
         # No approved fact means no free-text generation or model speculation.
@@ -52,26 +66,60 @@ class ModelComposer:
         # is only cost and latency.
         if not request.facts or not request.select_facts:
             return self.fallback.compose(request)
+        if not request.model_allowed:
+            fallback = self.fallback.compose(request)
+            return ReplyOutcome(
+                text=fallback.text,
+                generation=Generation.TEMPLATE,
+                displayed_facts=fallback.displayed_facts,
+                degraded=True,
+                degradation_reason=(
+                    request.model_budget_reason
+                    or "model reply skipped because the customer-turn budget is exhausted"
+                ),
+                history=list(request.history or []),
+            )
         prompt = policy.build_fact_selection_prompt(
-            facts=request.facts, customer_text=request.customer_text, concern=request.concern
+            facts=request.facts,
+            customer_text=request.customer_text,
+            concern=request.concern,
+            history=request.history,
+            memory=request.memory,
+            template_ids=self.fallback.template_ids_for(request.action.reply_mode),
+            template_descriptions=self.fallback.template_descriptions_for(
+                request.action.reply_mode
+            ),
         )
+        system_prompt = policy.fact_selection_system_prompt()
+        estimated_input_tokens = policy.estimate_prompt_tokens(
+            prompt + "\n\n" + system_prompt
+        ) + 256  # reserve room for structured-output schema instructions
+        if estimated_input_tokens > config.LLM_PER_REQUEST_INPUT_TOKEN_LIMIT:
+            fallback = self.fallback.compose(request)
+            return ReplyOutcome(
+                text=fallback.text,
+                generation=Generation.TEMPLATE,
+                displayed_facts=fallback.displayed_facts,
+                degraded=True,
+                degradation_reason=(
+                    "reply model skipped because the bounded conversation context "
+                    "and instructions exceed the per-request input limit"
+                ),
+                history=list(request.history or []),
+            )
         began = time.perf_counter()
         try:
             agent = Agent(
                 self.model,
                 output_type=FactSelection,
-                system_prompt=policy.fact_selection_system_prompt(),
+                system_prompt=system_prompt,
             )
-            # `request.history` is a list of domain `Message` objects, not
-            # pydantic-ai's own `ModelMessage` type — passing it as
-            # `message_history=` crashes with an `AttributeError` on the
-            # first field pydantic-ai tries to read off it, as soon as there
-            # is any prior turn at all. The fact-selection prompt is
-            # self-contained (the approved facts and the customer's own
-            # concern), so no history needs to travel with this call.
+            # Domain messages are passed as a source-labelled transcript in the
+            # user prompt. They are not pydantic-ai ModelMessage instances and
+            # cannot safely be supplied through `message_history=`.
             result = agent.run_sync(
                 prompt,
-                usage_limits=self.usage_limits,
+                usage_limits=request.usage_limits or self.usage_limits,
             )
             indices = list(dict.fromkeys(
                 index for index in result.output.fact_indices
@@ -85,6 +133,20 @@ class ModelComposer:
                 customer_name=request.customer_name, concern=request.concern,
                 customer_text=request.customer_text,
                 disclaimer=request.disclaimer, history=request.history,
+                memory=request.memory,
+                template_id=(
+                    result.output.template_id
+                    if result.output.template_id in self.fallback.template_ids_for(request.action.reply_mode)
+                    else None
+                ),
+                acknowledgement_id=(
+                    result.output.acknowledgement_id
+                    if result.output.acknowledgement_id in self.fallback.acknowledgement_ids()
+                    else "none"
+                ),
+                usage_limits=request.usage_limits,
+                model_allowed=request.model_allowed,
+                model_budget_reason=request.model_budget_reason,
             )
             rendered = self.fallback.compose(safe_request)
             elapsed_ms = int(round((time.perf_counter() - began) * 1000))
@@ -93,7 +155,7 @@ class ModelComposer:
                 purpose="response_generation",
                 duration_ms=elapsed_ms,
                 input_text=prompt,
-                output_text=json.dumps(result.output.model_dump()),
+                output_text=json.dumps(result.output.model_dump(exclude_unset=True)),
             )
             return ReplyOutcome(
                 text=rendered.text,
@@ -104,6 +166,7 @@ class ModelComposer:
                 # `TEMPLATE`. `interface-v1.md` §5.7 and every other composer in
                 # this codebase report it on that same basis.
                 generation=Generation.LLM,
+                displayed_facts=rendered.displayed_facts,
                 history=list(result.all_messages()),
                 usage=usage,
                 degraded=usage is None,
@@ -118,6 +181,7 @@ class ModelComposer:
             return ReplyOutcome(
                 text=degraded.text,
                 generation=Generation.TEMPLATE,
+                displayed_facts=degraded.displayed_facts,
                 degraded=True,
                 degradation_reason=(
                     f"model reply failed ({type(error).__name__}: {error}); "

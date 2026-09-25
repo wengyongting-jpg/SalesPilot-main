@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Any, Optional
 
 from ..domain.case import HumanCase
+from ..domain.decision import ActionKind, ActionStatus, PendingAction
+from ..domain.detection import BuyingPosture, EvidenceQuality, ObservationEvidence
 from ..domain.enums import (
     CaseStatus,
     Generation,
@@ -119,6 +121,17 @@ def _state_entry_from_dict(data: dict[str, Any]) -> StateHistoryEntry:
 
 
 def opportunity_to_dict(opp: Opportunity) -> dict[str, Any]:
+    pending = opp.pending_action
+    if pending is None and opp.pending_handoff_reason:
+        pending = PendingAction(
+            kind=ActionKind.HANDOFF,
+            reason_code="legacy_handoff",
+            reason=opp.pending_handoff_reason,
+            originating_customer_message_id=None,
+            originating_assistant_message_id=None,
+            status=ActionStatus.PENDING,
+            created_at=opp.updated_at,
+        )
     return {
         "id": opp.id,
         "customer_name": opp.customer_name,
@@ -141,6 +154,21 @@ def opportunity_to_dict(opp: Opportunity) -> dict[str, Any]:
         "human_takeover": opp.human_takeover,
         "human_intervention_required": opp.human_intervention_required,
         "pending_handoff_reason": opp.pending_handoff_reason,
+        "pending_action": ({
+            "kind": pending.kind.value,
+            "reason_code": pending.reason_code,
+            "reason": pending.reason,
+            "originating_customer_message_id": pending.originating_customer_message_id,
+            "originating_assistant_message_id": pending.originating_assistant_message_id,
+            "status": pending.status.value,
+            "created_at": _iso(pending.created_at),
+        } if pending else None),
+        "buying_posture": opp.buying_posture.value,
+        "posture_evidence": [
+            {"source_message_ids": list(e.source_message_ids), "span": e.span,
+             "quality": e.quality.value}
+            for e in opp.posture_evidence
+        ],
         "pending_question_field": opp.pending_question_field,
         "collected_answers": dict(opp.collected_answers),
         "evidence_sources": dict(opp.evidence_sources),
@@ -154,6 +182,37 @@ def opportunity_to_dict(opp: Opportunity) -> dict[str, Any]:
 
 
 def opportunity_from_dict(data: dict[str, Any]) -> Opportunity:
+    raw_action = data.get("pending_action")
+    if raw_action:
+        pending_action = PendingAction(
+            kind=ActionKind(raw_action["kind"]),
+            reason_code=raw_action.get("reason_code", "legacy_handoff"),
+            reason=raw_action.get("reason", data.get("pending_handoff_reason") or ""),
+            originating_customer_message_id=raw_action.get("originating_customer_message_id"),
+            originating_assistant_message_id=raw_action.get("originating_assistant_message_id"),
+            status=ActionStatus(raw_action.get("status", ActionStatus.PENDING.value)),
+            created_at=_dt(raw_action.get("created_at")) or _dt(data.get("updated_at")),
+        )
+    elif data.get("pending_handoff_reason"):
+        # Explicit lazy migration for v1 payloads written before typed actions.
+        pending_action = PendingAction(
+            kind=ActionKind.HANDOFF,
+            reason_code="legacy_handoff",
+            reason=data["pending_handoff_reason"],
+            originating_customer_message_id=None,
+            originating_assistant_message_id=None,
+            status=ActionStatus.PENDING,
+            created_at=_dt(data.get("updated_at")),
+        )
+    else:
+        pending_action = None
+    legacy_pending_reason = data.get("pending_handoff_reason")
+    if (
+        not legacy_pending_reason and pending_action
+        and pending_action.kind is ActionKind.HANDOFF
+        and pending_action.status is ActionStatus.PENDING
+    ):
+        legacy_pending_reason = pending_action.reason
     return Opportunity(
         id=data["id"],
         customer_name=data["customer_name"],
@@ -175,7 +234,16 @@ def opportunity_from_dict(data: dict[str, Any]) -> Opportunity:
         state_history=[_state_entry_from_dict(e) for e in data.get("state_history", [])],
         human_takeover=bool(data.get("human_takeover", False)),
         human_intervention_required=bool(data.get("human_intervention_required", False)),
-        pending_handoff_reason=data.get("pending_handoff_reason"),
+        pending_handoff_reason=legacy_pending_reason,
+        pending_action=pending_action,
+        buying_posture=BuyingPosture(data.get("buying_posture", BuyingPosture.UNKNOWN.value)),
+        posture_evidence=[
+            ObservationEvidence(
+                source_message_ids=list(e.get("source_message_ids", [])),
+                span=e.get("span", ""),
+                quality=EvidenceQuality(e.get("quality", EvidenceQuality.UNKNOWN.value)),
+            ) for e in data.get("posture_evidence", [])
+        ],
         pending_question_field=data.get("pending_question_field"),
         collected_answers=dict(data.get("collected_answers", {})),
         evidence_sources=dict(data.get("evidence_sources", {})),

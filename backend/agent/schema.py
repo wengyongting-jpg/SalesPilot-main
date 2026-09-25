@@ -29,7 +29,10 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from ..domain.detection import Detection
+from ..domain.detection import (
+    BuyingPosture, Detection, EvidenceQuality, ObservationEvidence,
+    TransactionIssue,
+)
 from ..domain.enums import Intent, Product, Signal
 from ..observability.violations import ModelViolation
 
@@ -88,6 +91,40 @@ class ExtractionOutput(BaseModel):
         default=False,
         description="True when the customer is explicitly deferring a decision.",
     )
+    buying_posture: BuyingPosture = Field(
+        default=BuyingPosture.UNKNOWN,
+        description=(
+            "The customer's current buying posture, based on their latest explicit "
+            "position. Asking an application-process question alone is browsing."
+        ),
+    )
+    posture_evidence: str = Field(
+        default="",
+        description=(
+            "A short exact supporting span from the latest customer message; empty "
+            "when posture is unknown. Do not invent or paraphrase evidence."
+        ),
+    )
+    posture_evidence_quality: EvidenceQuality = Field(
+        default=EvidenceQuality.UNKNOWN,
+        description="Quality of the exact posture span: clear, ambiguous, or unknown.",
+    )
+    transaction_issue: TransactionIssue = Field(
+        default=TransactionIssue.NONE,
+        description=(
+            "A customer-reported payment or order status that requires verification. "
+            "Use none for general questions about payment methods. A customer claim "
+            "does not verify that payment or policy activation occurred."
+        ),
+    )
+    transaction_evidence: str = Field(
+        default="",
+        description="Exact supporting words from the latest customer message; never paraphrase.",
+    )
+    transaction_evidence_quality: EvidenceQuality = Field(
+        default=EvidenceQuality.UNKNOWN,
+        description="Use clear only when the exact span explicitly states the transaction issue.",
+    )
 
 
 def allowed_values() -> dict[str, list[str]]:
@@ -100,6 +137,9 @@ def allowed_values() -> dict[str, list[str]]:
         "intent": [member.value for member in Intent],
         "product": [member.value for member in Product],
         "signals": [member.value for member in Signal],
+        "buying_posture": [member.value for member in BuyingPosture],
+        "posture_evidence_quality": [member.value for member in EvidenceQuality],
+        "transaction_issue": [member.value for member in TransactionIssue],
     }
 
 
@@ -115,6 +155,19 @@ def to_detection(output: ExtractionOutput) -> Detection:
         restricted=output.restricted,
         cancellation=output.cancellation,
         postponement=output.postponement,
+        buying_posture=output.buying_posture,
+        posture_evidence=(
+            [ObservationEvidence(span=output.posture_evidence, quality=output.posture_evidence_quality)]
+            if output.posture_evidence and output.buying_posture is not BuyingPosture.UNKNOWN
+            else []
+        ),
+        transaction_issue=output.transaction_issue,
+        transaction_evidence=(
+            [ObservationEvidence(span=output.transaction_evidence,
+                                 quality=output.transaction_evidence_quality)]
+            if output.transaction_evidence and output.transaction_issue is not TransactionIssue.NONE
+            else []
+        ),
     )
 
 
@@ -170,5 +223,25 @@ def parse(payload: dict, *, customer_text: str = "") -> tuple[Detection, list[Mo
         restricted=payload.get("restricted", False),
         cancellation=payload.get("cancellation", False),
         postponement=payload.get("postponement", False),
+        buying_posture=BuyingPosture(payload.get("buying_posture", BuyingPosture.UNKNOWN.value)),
+        posture_evidence=(
+            [ObservationEvidence(
+                span=str(payload["posture_evidence"]),
+                quality=EvidenceQuality(payload.get("posture_evidence_quality", EvidenceQuality.UNKNOWN.value)),
+            )]
+            if payload.get("posture_evidence") else []
+        ),
+        transaction_issue=TransactionIssue(
+            payload.get("transaction_issue", TransactionIssue.NONE.value)
+        ),
+        transaction_evidence=(
+            [ObservationEvidence(
+                span=str(payload["transaction_evidence"]),
+                quality=EvidenceQuality(payload.get(
+                    "transaction_evidence_quality", EvidenceQuality.UNKNOWN.value
+                )),
+            )]
+            if payload.get("transaction_evidence") else []
+        ),
     )
     return detection, violations

@@ -11,9 +11,41 @@ in `backend.kernel`, which is the only layer allowed to decide anything.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
 
 from .enums import Intent, Product, Signal
+
+
+class BuyingPosture(str, Enum):
+    UNKNOWN = "unknown"
+    BROWSING = "browsing"
+    EVALUATING = "evaluating"
+    CONDITIONAL = "conditional"
+    READY_NOW = "ready_now"
+    DEFERRED = "deferred"
+    DECLINED = "declined"
+
+
+class EvidenceQuality(str, Enum):
+    CLEAR = "clear"
+    AMBIGUOUS = "ambiguous"
+    UNKNOWN = "unknown"
+
+
+class TransactionIssue(str, Enum):
+    NONE = "none"
+    PAYMENT_REPORTED = "payment_reported"
+    PAYMENT_FAILED = "payment_failed"
+    PAYMENT_UNCONFIRMED = "payment_unconfirmed"
+    ORDER_STATUS = "order_status"
+
+
+@dataclass
+class ObservationEvidence:
+    source_message_ids: list[str] = field(default_factory=list)
+    span: str = ""
+    quality: EvidenceQuality = EvidenceQuality.UNKNOWN
 
 
 @dataclass
@@ -26,6 +58,17 @@ class Detection:
     # a personalised medical or underwriting question, a claim decision, a custom
     # quotation, or an explicit request for a person.
     restricted: bool = False
+
+    # Current customer buying posture is independent of task intent and the
+    # opportunity's historical best intent. Evidence is attached when the
+    # service binds an extraction result to actual transcript message IDs.
+    buying_posture: BuyingPosture = BuyingPosture.UNKNOWN
+    posture_evidence: list[ObservationEvidence] = field(default_factory=list)
+
+    # A customer-reported payment or order status is not verified transaction data.
+    # This observation routes the request to a person when no trusted order API exists.
+    transaction_issue: TransactionIssue = TransactionIssue.NONE
+    transaction_evidence: list[ObservationEvidence] = field(default_factory=list)
 
     # ---- Lifecycle observations -----------------------------------------
     # Two text judgements the previous build made *inside* the state machine, by

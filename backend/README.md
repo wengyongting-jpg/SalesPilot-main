@@ -27,8 +27,8 @@
 
 | | |
 | --- | --- |
-| **Status** | Demo surfaces operate; SQLite persistence and evaluation repair are planned, not complete. |
-| **Current plan** | [`persistence-repair-plan.md`](../docs/v1.0/persistence-repair-plan.md) |
+| **Status** | Demo surfaces operate; SQLite persistence, conversation memory and the typed handoff decision chain are implemented and offline-verified. Live-provider quality is not yet verified. |
+| **Current work** | [`docs/v1.0/README.md`](../docs/v1.0/README.md) |
 | **Historical design** | [`backend-plan.md`](../docs/v0.0/backend/backend-plan.md) and [`interface-v1.md`](../docs/v0.0/api/interface-v1.md) |
 
 ---
@@ -72,8 +72,8 @@ happened in between.
 | **P6** | `api/` — the HTTP surface, split by visibility tier | **done** |
 | **P7** | Model access, API testing, `--demo`, interface freeze | **done** |
 
-These are records of the earlier rebuild, not a claim that persistence repair is
-finished. With no model configured the pipeline runs on the
+These are records of the earlier rebuild, not a current acceptance checklist.
+With no model configured the pipeline runs on the
 rule-based and template peers, and every reply is marked `generation: "template"`.
 
 ## Why a rebuild rather than a refactor
@@ -119,8 +119,8 @@ domain  <-  kernel  <-  services  ->  agent  ->  providers
 | `agent/` | The agentic shell. **The only package permitted to call a model.** |
 | `observability/` | Agent run records, cost, terminal rendering. Never imported by `domain` or `kernel`. |
 | `providers/` | Model transports, including an offline provider that forces the deterministic path. |
-| `storage/` | Repositories: in-memory and SQLite. |
-| `services/` | Use-cases and orchestration of idempotency and run records. Atomic SQLite writes remain a planned repair. |
+| `storage/` | Repositories: in-memory and SQLite, including transactional turn persistence and sourced memory. |
+| `services/` | Use-cases and orchestration of idempotency, decisions, persistence and run records. |
 | `api/` | The HTTP surface, split by visibility tier. |
 
 `backend/tests/test_architecture.py` fails the build on a layering violation, on

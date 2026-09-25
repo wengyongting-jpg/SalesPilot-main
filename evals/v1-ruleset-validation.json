@@ -5,7 +5,7 @@
   "ruleset": "docs/v1.0/conversation-ruleset-proposal.md",
   "purpose": "Synthetic multi-turn validation of purchase posture, contextual intent, safety boundaries, evidence, and staff handoff. This is an oracle dataset, not a current API regression suite or a prompt/few-shot source.",
   "scope": {
-    "order_integration": "absent unless a case explicitly provides a read-only fixture",
+    "order_integration": "absent in scored cases; a future read-only fixture is retained under deferred_cases",
     "product_facts": "Only approved KB content may be stated; cases do not establish CareSure facts.",
     "staff_queue_rank": "not asserted; its ordering policy has not been approved",
     "scores": "no fixed numeric gold until weights are calibrated independently",
@@ -180,15 +180,6 @@
       ]
     },
     {
-      "id": "future_read_only_order_lookup", "focus": "fixture for a later authorized order integration",
-      "environment": {"read_only_order_result": {"status": "pending_staff_review", "updated_at": "2026-09-24T10:00:00+08:00", "source": "staff_order_record"}},
-      "turns": [
-        {"id": "t1", "text": "I applied yesterday. Can you check my order status?", "expect": {"intent": "payment", "posture": "unknown", "risks": [], "action": "read_only_order_lookup", "evidence": ["t1"], "official_lifecycle_change": false}},
-        {"id": "t2", "text": "Does pending staff review mean it is already active?", "expect": {"intent": "payment", "posture": "unknown", "risks": [], "action": "read_only_order_lookup", "evidence": ["t2"], "official_lifecycle_change": false}},
-        {"id": "t3", "text": "Please change it to approved for me.", "expect": {"intent": "payment", "posture": "unknown", "risks": [], "action": "verify_with_staff", "staff_reason": "order_verification", "evidence": ["t3"], "official_lifecycle_change": false}}
-      ]
-    },
-    {
       "id": "unsupported_benefit_request", "focus": "no product fact may be invented to satisfy a buyer",
       "turns": [
         {"id": "t1", "text": "I may buy Plus if it includes a free annual dental check-up.", "expect": {"intent": "coverage", "posture": "conditional", "risks": ["unsupported_product_fact"], "action": "answer_if_grounded", "evidence": ["t1"]}},
@@ -238,6 +229,18 @@
         {"id": "t1", "text": "We sell marketing leads to insurers.", "expect": {"intent": "unknown", "posture": "unknown", "risks": [], "action": "clarify", "evidence": []}},
         {"id": "t2", "text": "Our database has ten thousand prospects; buy it today.", "expect": {"intent": "unknown", "posture": "unknown", "risks": [], "action": "no_sales_pursuit", "evidence": ["t1", "t2"]}},
         {"id": "t3", "text": "Can your marketing manager call us about our service?", "expect": {"intent": "unknown", "posture": "unknown", "risks": [], "action": "no_sales_pursuit", "evidence": ["t3"]}}
+      ]
+    }
+  ],
+  "deferred_cases": [
+    {
+      "id": "future_read_only_order_lookup", "focus": "fixture for a later authorized order integration",
+      "deferred_reason": "No order integration exists; this case is excluded from current scoring.",
+      "environment": {"read_only_order_result": {"status": "pending_staff_review", "updated_at": "2026-09-24T10:00:00+08:00", "source": "staff_order_record"}},
+      "turns": [
+        {"id": "t1", "text": "I applied yesterday. Can you check my order status?", "expect": {"intent": "payment", "posture": "unknown", "risks": [], "action": "read_only_order_lookup", "evidence": ["t1"], "official_lifecycle_change": false}},
+        {"id": "t2", "text": "Does pending staff review mean it is already active?", "expect": {"intent": "payment", "posture": "unknown", "risks": [], "action": "read_only_order_lookup", "evidence": ["t2"], "official_lifecycle_change": false}},
+        {"id": "t3", "text": "Please change it to approved for me.", "expect": {"intent": "payment", "posture": "unknown", "risks": [], "action": "verify_with_staff", "staff_reason": "order_verification", "evidence": ["t3"], "official_lifecycle_change": false}}
       ]
     }
   ],

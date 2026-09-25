@@ -18,11 +18,9 @@ So while a representative owns the case:
                 cold lead, or collapse its value, while a human is working it. The
                 profile is the representative's context; it has to stay stable.
 
-    not frozen  the customer's own explicit lifecycle decisions. Withdrawal
-                ("I won't buy after all") and conversion ("I've paid") are the
-                customer acting, not the AI selling, so they move the opportunity
-                even under takeover. Takeover itself stays active in both cases;
-                only the sales *decisions and wording* remain suppressed.
+    not frozen  the customer's explicit withdrawal. A reported payment is not a
+                trusted conversion signal; only a staff action or a trusted order
+                system may confirm the sale.
 
 Ambiguous, generic and hesitant messages stay frozen, which is the asymmetry that
 matters: an explicit statement of outcome is trustworthy evidence, a vague one is not.
@@ -36,7 +34,7 @@ from ..domain.enums import Signal
 from ..domain.opportunity import Opportunity
 
 # The two signals that represent the customer deciding something themselves.
-_LIFECYCLE_SIGNALS = (Signal.WITHDRAWAL, Signal.CONVERSION)
+_LIFECYCLE_SIGNALS = (Signal.WITHDRAWAL,)
 
 
 @dataclass

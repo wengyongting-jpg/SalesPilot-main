@@ -27,13 +27,20 @@ from typing import Any, Callable, Optional
 
 from .. import config
 from ..agent import policy, runtime
+from ..agent import telemetry
+from ..agent.budget import for_turn as model_budget_for_turn
 from ..agent.extraction import Extractor, build_extractor
 from ..agent.extraction.rules import product as product_rules
 from ..agent.model_factory import build as build_model
 from ..agent.reply import Composer, build_composer
 from ..domain.case import HumanCase
-from ..domain.detection import Detection, RetrievalResult
-from ..domain.enums import Generation, Intent, OpportunityState, Product, ReplyMode, Signal
+from ..domain.decision import (
+    ActionKind, ActionStatus, Decision, DecisionAction, PendingAction,
+)
+from ..domain.detection import (
+    BuyingPosture, Detection, EvidenceQuality, RetrievalResult, TransactionIssue,
+)
+from ..domain.enums import CaseStatus, Generation, Intent, OpportunityState, Product, ReplyMode, Signal
 from ..domain.message import Message, MessageAuthor, MessageRole
 from ..domain.opportunity import (
     Opportunity,
@@ -42,6 +49,7 @@ from ..domain.opportunity import (
     StateHistoryEntry,
 )
 from ..kernel import (
+    decision as decision_policy,
     hitl,
     next_best_action,
     qualification,
@@ -62,12 +70,9 @@ from . import cases
 # §12.1: model-authored free text is a prompt-injection path; keep it short.
 _MAX_CONCERN_CHARS = 200
 
-# The reply and the cards must agree: returning a premium fact alongside "a
-# representative will be in touch" would put a price card under a handover
-# message, or offer plans to a conversation the qualification gate has held.
-# `retrieval.facts` still runs in every mode (so telemetry sees what would
-# have been available), but only these three modes are permitted to *show*
-# them to the customer.
+# Retrieval still runs in every mode for diagnostics, but these modes do not
+# show facts. The composer reports which facts it actually rendered; retrieval
+# alone must never be used to populate customer-facing cards.
 _NO_FACTS_REPLY_MODES = frozenset(
     {ReplyMode.HANDOVER, ReplyMode.HOLD, ReplyMode.WITHDRAWN, ReplyMode.GREETING}
 )
@@ -106,9 +111,7 @@ class TurnResult:
     quick_replies: list[QuickReply] = field(default_factory=list)
     run: Optional[AgentRun] = None
     extraction_source: Optional[str] = None
-    # What the assistant was permitted to say this turn — not `retrieval.facts`
-    # directly, which still runs in every mode. Empty whenever the reply mode
-    # is one the customer-safe reply must not attach a product card to.
+    # Approved facts actually rendered this turn, not all retrieved candidates.
     customer_facts: list[str] = field(default_factory=list)
     # Set once, on the turn that actually ran the pipeline, and copied onto a
     # replay's `TurnResult` verbatim: idempotency means a replay returns the
@@ -248,16 +251,50 @@ class ConversationService:
             customer_message_count=opp.customer_message_count,
         )
 
-        # Check for pending handoff confirmation
-        if opp.pending_handoff_reason:
-            answer = self._handoff_answer(text)
-            if answer is not None:
-                # Customer answered Confirm/Cancel
-                return self._resolve_handoff(opp, answer, client_message_id=key, recorder=recorder)
-            # Other response supersedes the handoff offer; evaluate it afresh
-            with recorder.step("handoff_superseded", "rule") as step:
-                step.note(f"Customer response '{text[:50]}' supersedes pending handoff; evaluating as new request")
-            opp.pending_handoff_reason = None
+        # Resolve short responses only against an explicit typed prompt.
+        pending = opp.pending_action
+        if pending is None and opp.pending_handoff_reason:
+            # Lazy compatibility for in-memory records written before typed actions.
+            pending = PendingAction(
+                kind=ActionKind.HANDOFF, reason_code="legacy_handoff",
+                reason=opp.pending_handoff_reason,
+                originating_customer_message_id=None,
+                originating_assistant_message_id=None,
+                status=ActionStatus.PENDING, created_at=now,
+            )
+            opp.pending_action = pending
+        pending_decision = decision_policy.decide_pending_response(
+            pending, text, current_message_id=opp.messages[-1].id,
+        )
+        requested_handoff_reason = None
+        cancelled_readiness_invitation = False
+        clarify_unanchored_affirmative = bool(
+            (pending is None or pending.status is not ActionStatus.PENDING)
+            and pending_decision is not None
+            and pending_decision.action is DecisionAction.CLARIFY
+        )
+        clarify_ready_without_referent = False
+        if pending_decision is not None:
+            if pending_decision.action is DecisionAction.CONFIRM_HANDOFF:
+                return self._resolve_handoff(opp, True, client_message_id=key, recorder=recorder)
+            if pending_decision.action is DecisionAction.CANCEL_HANDOFF:
+                if pending and pending.kind is ActionKind.HANDOFF:
+                    return self._resolve_handoff(opp, False, client_message_id=key, recorder=recorder)
+                cancelled_readiness_invitation = bool(
+                    pending and pending.kind is ActionKind.READINESS_INVITATION
+                )
+                pending.status = ActionStatus.CANCELLED
+                opp.pending_handoff_reason = None
+            elif pending_decision.action is DecisionAction.OFFER_HANDOFF:
+                requested_handoff_reason = hitl.REASON_READY_TO_PROCEED
+                pending.status = ActionStatus.CONFIRMED
+            elif pending_decision.action is DecisionAction.CLARIFY:
+                pass
+            else:
+                with recorder.step("pending_action_superseded", "rule") as step:
+                    step.note("Pending prompt response was unrelated; evaluating as a new request")
+                pending.status = ActionStatus.CANCELLED
+                opp.pending_handoff_reason = None
 
         # Check for a pending clarifying-question answer. Captured, then still
         # falls through into normal extraction below with the same text: an
@@ -300,6 +337,44 @@ class ConversationService:
         det = outcome.detection
         if det.product is Product.UNKNOWN:
             det.product = opp.product  # product is sticky across the conversation
+        current_customer_message = opp.messages[-1]
+        bound_evidence = []
+        for evidence in det.posture_evidence:
+            if evidence.span and evidence.span.casefold() in text.casefold():
+                evidence.source_message_ids = [current_customer_message.id]
+                bound_evidence.append(evidence)
+        det.posture_evidence = bound_evidence
+        if (
+            det.buying_posture.value != "unknown" and bound_evidence
+            and any(e.quality is EvidenceQuality.CLEAR for e in bound_evidence)
+        ):
+            opp.buying_posture = det.buying_posture
+            opp.posture_evidence = list(bound_evidence)
+            if det.buying_posture is BuyingPosture.DEFERRED:
+                det.postponement = True
+        elif det.buying_posture.value != "unknown":
+            # An unsupported extraction is not allowed to overwrite current posture.
+            det.buying_posture = type(det.buying_posture).UNKNOWN
+
+        bound_transaction_evidence = []
+        for evidence in det.transaction_evidence:
+            if evidence.span and evidence.span.casefold() in text.casefold():
+                evidence.source_message_ids = [current_customer_message.id]
+                bound_transaction_evidence.append(evidence)
+        det.transaction_evidence = bound_transaction_evidence
+        if (
+            det.transaction_issue is not TransactionIssue.NONE
+            and bound_transaction_evidence
+            and any(item.quality is EvidenceQuality.CLEAR for item in bound_transaction_evidence)
+        ):
+            # A customer-reported transaction outcome is not verified. Prevent
+            # that same report from being treated as a purchase or conversion.
+            det.signals = [
+                signal for signal in det.signals
+                if signal not in {Signal.CONVERSION, Signal.PURCHASE}
+            ]
+        elif det.transaction_issue is not TransactionIssue.NONE:
+            det.transaction_issue = TransactionIssue.NONE
 
         # 2. Kernel, in the mandated order.
         with recorder.step("takeover", "rule") as step:
@@ -339,7 +414,21 @@ class ConversationService:
 
         with recorder.step("profile_update", "rule") as step:
             _update_profile(opp, det, text)
-            step.note(f"intent={det.intent.value} best={opp.best_intent.value} signals={len(opp.signals)}")
+            evidence_ids = sorted({
+                source_id for evidence in det.posture_evidence
+                for source_id in evidence.source_message_ids
+            })
+            transaction_evidence_ids = sorted({
+                source_id for evidence in det.transaction_evidence
+                for source_id in evidence.source_message_ids
+            })
+            step.note(
+                f"intent={det.intent.value} posture={det.buying_posture.value} "
+                f"posture_evidence={','.join(evidence_ids) or '-'} "
+                f"transaction_issue={det.transaction_issue.value} "
+                f"transaction_evidence={','.join(transaction_evidence_ids) or '-'} "
+                f"best={opp.best_intent.value} signals={len(opp.signals)}"
+            )
 
         with recorder.step("scoring", "rule") as step:
             card = scoring.score(opp, det, text, now=now)
@@ -382,16 +471,36 @@ class ConversationService:
             # separate acceptance function to call. `proposal_accepted` here is
             # only for the diagnostic note below, derived from that same
             # returned reason rather than duplicating the acceptance check.
-            reason = hitl.evaluate(
-                opp,
-                det,
-                retrieval,
-                confidence_floor=config.RETRIEVAL_CONFIDENCE_ESCALATE,
-                customer_text=text,
-                proposal=proposal,
+            policy_decision = (
+                Decision(
+                    action=DecisionAction.OFFER_HANDOFF,
+                    reason_code="sales_followup",
+                    reason=requested_handoff_reason,
+                    evidence_message_ids=(pending_decision.evidence_message_ids
+                                          if pending_decision else ()),
+                )
+                if requested_handoff_reason else hitl.decide(
+                    opp, det, retrieval,
+                    confidence_floor=config.RETRIEVAL_CONFIDENCE_ESCALATE,
+                    customer_text=text,
+                    proposal=proposal,
+                    customer_message_id=current_customer_message.id,
+                )
+            )
+            clarify_ready_without_referent = (
+                det.buying_posture is BuyingPosture.READY_NOW
+                and policy_decision.action is DecisionAction.CLARIFY
+                and policy_decision.reason_code == "ready_without_referent"
+            )
+            reason = (
+                policy_decision.reason
+                if policy_decision.action in (
+                    DecisionAction.OFFER_HANDOFF, DecisionAction.HOLD_FOR_STAFF
+                ) else None
             )
             proposal_accepted = bool(reason) and reason.startswith(hitl.REASON_ASSISTANT_PROPOSED)
             case: Optional[HumanCase] = None
+            case_updated = False
             if reason:
                 # A human is taking this over, or about to be asked to
                 # (handoff confirmation): a clarifying-question flow that was
@@ -407,20 +516,34 @@ class ConversationService:
                     existing_case.recommended_action = nba_for_case.action
                     existing_case.summary = f"{existing_case.summary} [Update] {reason}"
                     case = existing_case
-                    opp.human_takeover = True
+                    case_updated = True
+                    opp.human_takeover = case.status is CaseStatus.TAKEN_OVER
                     opp.human_intervention_required = True
                 else:
                     # No active case: request confirmation first
                     step.note(f"confirmation requested: {reason}")
                     opp.pending_handoff_reason = reason
                     opp.human_intervention_required = True
-            detail = f"escalate={reason}" if reason else "no escalation"
+            detail = (
+                f"action={policy_decision.action.value} "
+                f"reason_code={policy_decision.reason_code}"
+            )
+            if reason:
+                detail += f" reason={reason}"
+            if policy_decision.evidence_message_ids:
+                detail += f" evidence={','.join(policy_decision.evidence_message_ids)}"
             if proposal is not None and proposal.requested:
                 detail += f"; proposal={proposal.reason!r} -> {'accepted' if proposal_accepted else 'declined'}"
             step.note(detail)
 
         with recorder.step("next_best_action", "rule") as step:
-            nba = next_best_action.recommend(opp, det, escalated=bool(reason))
+            queued_case = self.repo.active_case_for(opp.id)
+            case_waiting_for_staff = bool(
+                queued_case is not None and queued_case.status is CaseStatus.OPEN
+            )
+            nba = next_best_action.recommend(
+                opp, det, escalated=bool(reason) or case_waiting_for_staff
+            )
             step.note(nba.action)
 
         with recorder.step("clarifying_question", "rule") as step:
@@ -451,7 +574,7 @@ class ConversationService:
                 step.note("no question proposed")
 
         chips = quick_replies.suggest(opp, det)
-        customer_facts = [] if nba.reply_mode in _NO_FACTS_REPLY_MODES else list(retrieval.facts)
+        customer_facts: list[str] = []
 
         # 3. Composing segment: only a customer-safe projection crosses over.
         withdrawal = Signal.WITHDRAWAL in det.signals
@@ -460,33 +583,18 @@ class ConversationService:
 
         # Check if we need to request handoff confirmation
         if opp.pending_handoff_reason:
-            # Return confirmation prompt instead of normal reply
-            handoff_reason = opp.pending_handoff_reason
-            if handoff_reason == hitl.REASON_HUMAN_REQUEST:
-                prompt = "Would you like me to notify a CareSure representative?"
-            elif handoff_reason == hitl.REASON_COMPETITIVE:
-                prompt = "A representative can help with the next step. Shall I notify the team?"
-            else:
-                prompt = "That needs a representative's review; I cannot decide it here. Shall I notify the team?"
-
-            reply_text = f"{prompt} Reply 'Confirm' or 'Cancel'."
-            reply_message = Message(
-                role=MessageRole.BUSINESS,
-                text=reply_text,
-                author=MessageAuthor.AI,
-                generation=Generation.TEMPLATE,
-            )
-            opp.messages.append(reply_message)
+            reply_message = self._offer_handoff(opp, policy_decision, now)
             chips = self._handoff_chips()
 
             with recorder.step("response_generation", "template") as step:
-                step.note(f"handoff_confirmation_requested reason={handoff_reason}")
+                step.note(f"handoff_confirmation_requested reason={opp.pending_handoff_reason}")
         else:
             # Normal reply generation.
             # Build ReplyRequest from the kernel decision
             from ..agent.reply import ReplyRequest
             from ..knowledge import loader
             kb = loader.load()
+            reply_budget = model_budget_for_turn(recorder, allow_tools=False)
             reply_request = ReplyRequest(
                 action=nba,
                 facts=list(retrieval.facts),
@@ -495,6 +603,10 @@ class ConversationService:
                 customer_text=text,
                 disclaimer=kb.disclaimer,
                 history=opp.messages[:-1],  # All messages except the current customer message
+                memory=outcome.memory,
+                usage_limits=reply_budget.limits,
+                model_allowed=reply_budget.allowed,
+                model_budget_reason=reply_budget.reason,
                 # `retrieval.product` is UNKNOWN only for the product-overview
                 # case (`KnowledgeRetriever._product_overview`) - a short,
                 # already-curated one-liner per plan, not a larger pool to pick
@@ -503,24 +615,106 @@ class ConversationService:
                 select_facts=retrieval.product is not Product.UNKNOWN,
             )
 
-            # 3. Composing segment: record as response_generation step
-            with recorder.step("response_generation", "template") as step:
-                reply_outcome = self.composer.compose(reply_request)
-                step.note(f"mode={nba.reply_mode.value} facts={len(reply_request.facts)}")
-                if reply_outcome.degraded and not reply_outcome.by_design:
-                    step.degrade(reply_outcome.degradation_reason or "degraded")
+            # Some deterministic outcomes replace any composed answer below.
+            # Decide those first so we do not spend a model call whose output
+            # cannot reach the customer.
+            fixed_reply = None
+            if det.buying_posture is BuyingPosture.DEFERRED:
+                fixed_reply = "Understood. I'll leave this here for now. You can come back whenever you're ready."
+            if case_updated:
+                if opp.human_takeover:
+                    fixed_reply = "A representative is handling your request. I'll leave this conversation with them."
+                else:
+                    fixed_reply = "I've added this update to your existing request. A representative can review it when they take up your case."
+            elif case_waiting_for_staff:
+                fixed_reply = "Your request is in the staff queue. I can't make that decision here."
+            if cancelled_readiness_invitation:
+                fixed_reply = "Understood. I won't ask you to confirm that step again."
+            if clarify_unanchored_affirmative:
+                fixed_reply = (
+                    "What would you like help with next? I can explain the application "
+                    "steps or help with another question."
+                )
+            elif clarify_ready_without_referent:
+                fixed_reply = "What would you like to do next? I can explain the application steps or answer another question."
 
-            reply_text = reply_outcome.text
-            if opp.pending_question_field:
-                reply_text = f"{reply_text}\n\n{questions.text_prompt(opp.pending_question_field)}"
+            answer_gap = False
+            if fixed_reply is not None:
+                with recorder.step("response_generation", "template") as step:
+                    step.note("deterministic response; model composition skipped")
+                reply_text = fixed_reply
+                reply_generation = Generation.TEMPLATE
+            else:
+                # 3. Composing segment: record both the model trace and the
+                # final mode in the same run as extraction and the kernel.
+                with recorder.step("response_generation", "template") as step:
+                    reply_outcome = self.composer.compose(reply_request)
+                    step.note(f"mode={nba.reply_mode.value} facts={len(reply_request.facts)}")
+                    if reply_outcome.generation is Generation.LLM:
+                        recorder.steps[-1].kind = "llm"
+                        if reply_outcome.history:
+                            telemetry.record_trace(
+                                recorder,
+                                reply_outcome.history,
+                                purpose="response_generation",
+                                finished_at=datetime.now().astimezone(),
+                            )
+                    if reply_outcome.degraded and not reply_outcome.by_design:
+                        step.degrade(reply_outcome.degradation_reason or "degraded")
+                reply_text = reply_outcome.text
+                reply_generation = reply_outcome.generation
+                customer_facts = list(reply_outcome.displayed_facts)
+                # Retrieval confidence measures candidate quality, not whether
+                # the final composer found an answer to this particular question.
+                answer_gap = (
+                    not customer_facts
+                    and nba.reply_mode not in _NO_FACTS_REPLY_MODES
+                )
+            if answer_gap:
+                policy_decision = Decision(
+                    action=DecisionAction.OFFER_HANDOFF,
+                    reason_code="knowledge_gap",
+                    reason="No approved fact answered the customer's question",
+                    evidence_message_ids=(current_customer_message.id,),
+                )
+                with recorder.step("answerability_guard", "rule") as step:
+                    step.note(
+                        "composer returned no displayed facts; "
+                        "replaced unsupported answer with handoff confirmation"
+                    )
+                reply_message = self._offer_handoff(
+                    opp, policy_decision, now, generation=reply_generation
+                )
+                chips = self._handoff_chips()
+                nba = next_best_action.recommend(opp, det, escalated=True)
+            else:
+                if opp.pending_question_field:
+                    reply_text = f"{reply_text}\n\n{questions.text_prompt(opp.pending_question_field)}"
 
-            reply_message = Message(
-                role=MessageRole.BUSINESS,
-                text=reply_text,
-                author=MessageAuthor.AI,
-                generation=reply_outcome.generation,
-            )
-            opp.messages.append(reply_message)
+                reply_message = Message(
+                    role=MessageRole.BUSINESS,
+                    text=reply_text,
+                    author=MessageAuthor.AI,
+                    generation=reply_generation,
+                )
+                if nba.reply_mode is ReplyMode.CLOSE and det.buying_posture not in {
+                    BuyingPosture.DEFERRED, BuyingPosture.DECLINED,
+                } and not clarify_ready_without_referent \
+                        and not clarify_unanchored_affirmative \
+                        and not cancelled_readiness_invitation:
+                    opp.pending_action = PendingAction(
+                        kind=ActionKind.READINESS_INVITATION,
+                        reason_code="sales_followup",
+                        reason="Customer was invited to signal readiness for next-step help",
+                        originating_customer_message_id=next(
+                            (message.id for message in reversed(opp.messages)
+                             if message.role is MessageRole.CUSTOMER), None
+                        ),
+                        originating_assistant_message_id=reply_message.id,
+                        status=ActionStatus.PENDING,
+                        created_at=now,
+                    )
+                opp.messages.append(reply_message)
 
         # 4. Storage and observability.
         opp.score_history.append(
@@ -610,13 +804,70 @@ class ConversationService:
         ]
 
     @staticmethod
+    def _offer_handoff(
+        opp: Opportunity,
+        decision: Decision,
+        now: datetime,
+        *,
+        generation: Generation = Generation.TEMPLATE,
+    ) -> Message:
+        """Ask for consent and persist a pending handoff without creating a case."""
+        reason_explanations = {
+            "payment_reported": "you reported a payment and I can't verify whether it was received",
+            "payment_failed": "your payment attempt needs staff review",
+            "payment_unconfirmed": "the charge has no confirmation and I can't verify the policy status",
+            "order_status": "I can't access or verify the order or application status",
+            "human_request": "you asked to speak with a person",
+            "complaint": "your complaint needs a representative's review",
+            "restricted_decision": "this request requires a staff decision",
+            "custom_quote": "a representative needs to review or prepare this quote",
+            "knowledge_gap": "I don't have approved information that answers your question",
+            "sales_followup": "you asked for help with the next step",
+            "assistant_proposal": "this request needs a representative's review",
+            "staff_review": "this request needs a representative's review",
+        }
+        explanation = reason_explanations.get(
+            decision.reason_code, "this request needs a representative's review"
+        )
+        reply_message = Message(
+            role=MessageRole.BUSINESS,
+            text=(
+                f"Because {explanation}, I can submit this conversation to a "
+                "representative for review. Would you like me to? Reply 'Confirm' or 'Cancel'."
+            ),
+            author=MessageAuthor.AI,
+            generation=generation,
+        )
+        opp.pending_handoff_reason = decision.reason
+        opp.human_intervention_required = True
+        opp.pending_question_field = None
+        opp.pending_action = PendingAction(
+            kind=ActionKind.HANDOFF,
+            reason_code=decision.reason_code,
+            reason=decision.reason or "Customer requested a representative",
+            originating_customer_message_id=next(
+                (message.id for message in reversed(opp.messages)
+                 if message.role is MessageRole.CUSTOMER), None
+            ),
+            originating_assistant_message_id=reply_message.id,
+            status=ActionStatus.PENDING,
+            created_at=now,
+        )
+        opp.messages.append(reply_message)
+        return reply_message
+
+    @staticmethod
     def _handoff_answer(text: str) -> Optional[bool]:
         """Parse customer's handoff confirmation response.
 
         Returns True for confirmation, False for cancellation, None for other responses.
         """
         normalized = " ".join(text.lower().split()).strip(".!? ")
-        if normalized in {"confirm", "yes", "yes please", "please do", "确认", "是", "好的"}:
+        if normalized in {
+            "confirm", "yes", "yes please", "please do", "yes im ready",
+            "yes i'm ready", "yes i’m ready", "i'm ready", "i’m ready",
+            "i am ready", "ready", "go ahead", "确认", "是", "好的",
+        }:
             return True
         if normalized in {"cancel", "no", "no thanks", "not now", "取消", "否", "不用"}:
             return False
@@ -633,6 +884,10 @@ class ConversationService:
         """Process customer's handoff confirmation decision."""
         reason = opp.pending_handoff_reason or "Customer requested a representative"
         opp.pending_handoff_reason = None
+        if opp.pending_action is not None:
+            opp.pending_action.status = (
+                ActionStatus.CONFIRMED if confirmed else ActionStatus.CANCELLED
+            )
         case = None
         now = self._now()
 
@@ -656,10 +911,17 @@ class ConversationService:
                 case.recommended_action = "Contact representative"
                 case.summary = f"{case.summary} [Update] Customer confirmed: {reason}"
 
-            opp.human_takeover = True
-            reply_text = "A representative will contact you shortly. Thank you for your patience."
+            # Customer confirmation creates a queued case; staff ownership starts
+            # only when the representative explicitly moves it to TAKEN_OVER.
+            opp.human_takeover = False
+            opp.human_intervention_required = True
+            reply_text = (
+                "I've added your request to the staff queue. "
+                "A representative can contact you after reviewing it."
+            )
         else:
             # Customer cancelled: continue with AI
+            opp.human_intervention_required = False
             reply_text = "Understood. How else can I help you?"
 
         reply_message = Message(
@@ -739,7 +1001,8 @@ def _update_profile(opp: Opportunity, det: Detection, text: str) -> None:
 
     opp.product = det.product
     opp.last_intent = det.intent
-    opp.best_intent = scoring.effective_intent(det.intent, opp.best_intent)
+    if det.transaction_issue is TransactionIssue.NONE:
+        opp.best_intent = scoring.effective_intent(det.intent, opp.best_intent)
     if scoring.urgency_in(text):
         opp.urgency_observed = True
     if det.concerns:

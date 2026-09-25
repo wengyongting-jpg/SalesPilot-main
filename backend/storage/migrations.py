@@ -27,6 +27,7 @@ MIGRATIONS: list[tuple[int, str]] = [
             FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
         );
     """),
+    (3, "ALTER TABLE opportunities ADD COLUMN pending_action TEXT;"),
 ]
 
 

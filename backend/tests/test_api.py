@@ -196,6 +196,10 @@ class TestCustomerSurface(unittest.TestCase):
     def test_a_human_representatives_name_reaches_the_customer_transcript(self):
         self.post("I want to speak to a human agent")
         self.post("Confirm")
+        case = self.client.get("/api/admin/cases").json()["items"][0]
+        self.client.patch(
+            f"/api/admin/cases/{case['id']}", json={"status": "TAKEN_OVER"}
+        )
         self.client.post(
             "/api/admin/opportunities/C-1/rep-reply",
             json={"text": "Alex here.", "rep_name": "Alex"},
@@ -371,6 +375,7 @@ class TestAdminSurface(unittest.TestCase):
         cases = self.client.get("/api/admin/cases").json()
         self.assertEqual(1, cases["count"])
         self.assertEqual("Open", cases["items"][0]["status"])
+        self.assertFalse(self.client.get("/api/admin/opportunities/C-1").json()["human_takeover"])
 
     def test_a_case_transitions_through_the_exact_strings(self):
         self.post("I want to speak to a human agent")
@@ -382,6 +387,13 @@ class TestAdminSurface(unittest.TestCase):
         )
         self.assertEqual(200, taken.status_code)
         self.assertEqual("Taken Over", taken.json()["status"])
+        self.assertTrue(self.client.get("/api/admin/opportunities/C-1").json()["human_takeover"])
+
+        reopened = self.client.patch(
+            f"/api/admin/cases/{case_id}", json={"status": "OPEN"}
+        )
+        self.assertEqual("Open", reopened.json()["status"])
+        self.assertFalse(self.client.get("/api/admin/opportunities/C-1").json()["human_takeover"])
 
         closed = self.client.patch(
             f"/api/admin/cases/{case_id}", json={"status": "Closed"}
@@ -441,6 +453,8 @@ class TestAdminSurface(unittest.TestCase):
     def test_a_rep_reply_under_takeover_is_attributed_to_the_person(self):
         self.post("I want to speak to a human agent")
         self.post("Confirm")
+        case_id = self.client.get("/api/admin/cases").json()["items"][0]["id"]
+        self.client.patch(f"/api/admin/cases/{case_id}", json={"status": "TAKEN_OVER"})
         response = self.client.post(
             "/api/admin/opportunities/C-1/rep-reply",
             json={"text": "Alex here, happy to help.", "rep_name": "Alex",
@@ -457,6 +471,8 @@ class TestAdminSurface(unittest.TestCase):
         """The point of the endpoint: a real person joins the conversation."""
         self.post("I want to speak to a human agent")
         self.post("Confirm")
+        case_id = self.client.get("/api/admin/cases").json()["items"][0]["id"]
+        self.client.patch(f"/api/admin/cases/{case_id}", json={"status": "TAKEN_OVER"})
         self.client.post(
             "/api/admin/opportunities/C-1/rep-reply",
             json={"text": "Alex here.", "rep_name": "Alex"},
@@ -694,7 +710,7 @@ class TestHttpHandoffAcrossSqliteRestart(unittest.TestCase):
                     "client_message_id": "confirm-http",
                 })
                 self.assertEqual(200, confirmed.status_code)
-                self.assertTrue(second_repo.get_opportunity("C-http").human_takeover)
+                self.assertFalse(second_repo.get_opportunity("C-http").human_takeover)
                 cases = second_client.get("/api/admin/cases").json()["items"]
                 self.assertEqual(1, len(cases))
                 self.assertEqual(2, len(second_repo.list_runs(opportunity_id="C-http")))

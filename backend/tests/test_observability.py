@@ -23,7 +23,7 @@ import unittest
 from decimal import Decimal
 
 from backend.observability import RunRecorder, render
-from backend.observability.pricing import cost_for
+from backend.observability.pricing import cost_for, is_known
 
 
 def _ticking_clock(step_seconds: float = 0.001):
@@ -71,6 +71,14 @@ class TestPricing(unittest.TestCase):
 
     def test_a_dated_snapshot_prices_as_its_base_model(self):
         self.assertEqual(cost_for("gpt-4o-mini-2024-07-18", 1000, 500).amount, Decimal("0.00045"))
+
+    def test_bedrock_global_claude_sonnet_45_is_priced(self):
+        model_id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        self.assertTrue(is_known(model_id))
+        cost = cost_for(
+            model_id, 1000, 500
+        )
+        self.assertEqual(cost.amount, Decimal("0.0105"))
 
     def test_unknown_model_is_unpriced_not_free(self):
         self.assertIsNone(cost_for("some-unknown-model", 1000, 500))

@@ -79,12 +79,20 @@ _BY_STATE = {
     OpportunityState.DORMANT_LOST: (),
 }
 
-# A few intents shift what is most useful, without overriding the state.
+# A specific question should determine the suggestions, not merely prepend one
+# option to the same three state defaults. Offer fewer options when that is all
+# that is relevant; a chip is not an obligation to fill every slot.
 _BY_INTENT = {
-    Intent.CORPORATE_NEED: ("qr_for_employees",),
-    Intent.FAMILY_NEED: ("qr_add_family",),
-    Intent.CLAIMS: ("qr_how_to_claim",),
-    Intent.PAYMENT: ("qr_how_to_pay",),
+    Intent.PRICE: ("qr_whats_covered", "qr_compare_plans"),
+    Intent.COVERAGE: ("qr_waiting_period", "qr_who_can_apply"),
+    Intent.ELIGIBILITY: ("qr_whats_covered", "qr_how_to_apply"),
+    Intent.WAITING_PERIOD: ("qr_whats_covered", "qr_how_to_apply"),
+    Intent.COMPARISON: ("qr_whats_covered", "qr_talk_to_person"),
+    Intent.APPLICATION: ("qr_talk_to_person", "qr_who_can_apply", "qr_how_to_pay"),
+    Intent.CORPORATE_NEED: ("qr_for_employees", "qr_talk_to_person"),
+    Intent.FAMILY_NEED: ("qr_who_can_apply", "qr_whats_covered"),
+    Intent.CLAIMS: ("qr_talk_to_person",),
+    Intent.PAYMENT: ("qr_talk_to_person",),
 }
 
 
@@ -113,12 +121,7 @@ def suggest(opp, det: Detection) -> list[QuickReply]:
     if Signal.WITHDRAWAL in set(det.signals) | set(opp.signals):
         return []
 
-    ordered: list[str] = []
-    for key in _BY_INTENT.get(det.intent, ()):
-        if key not in ordered:
-            ordered.append(key)
-    for key in _BY_STATE.get(opp.state, ()):
-        if key not in ordered:
-            ordered.append(key)
-
-    return [_ALL[key] for key in ordered[:MAX_CHIPS]]
+    choices = _BY_INTENT.get(det.intent)
+    if choices is None:
+        choices = _BY_STATE.get(opp.state, ())
+    return [_ALL[key] for key in choices[:MAX_CHIPS]]

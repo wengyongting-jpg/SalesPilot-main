@@ -1,6 +1,6 @@
 # SalesPilot multi-turn evaluation
 
-The suite contains 24 conversations of two to four turns each (81 total). Escalation
+The suite currently contains 27 conversations (90 turns). Escalation
 cases require a separate customer confirmation before human takeover. Expectations are business
 labels (intent, product, signals, state, qualification and handover), not reply copy.
 

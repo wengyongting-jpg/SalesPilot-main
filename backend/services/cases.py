@@ -53,6 +53,11 @@ class CaseService:
             self._claim(case.opportunity_id)
         elif new_status is CaseStatus.CLOSED:
             self._resume_autonomy(case.opportunity_id)
+        elif new_status is CaseStatus.OPEN:
+            # Reopening a case returns it to the unclaimed staff queue. Keep the
+            # intervention requirement, but release human ownership consistently
+            # with the case's Open status.
+            self._release_takeover(case.opportunity_id)
 
         self.logger.info(
             "case %s | %s -> %s", case.id, case.opportunity_id, case.status.value
@@ -78,6 +83,14 @@ class CaseService:
             return
         opp.human_takeover = False
         opp.human_intervention_required = False
+        self.repo.upsert_opportunity(opp)
+
+    def _release_takeover(self, opportunity_id: str) -> None:
+        """An Open case is queued for staff but is not currently claimed."""
+        opp = self.repo.get_opportunity(opportunity_id)
+        if opp is None:
+            return
+        opp.human_takeover = False
         self.repo.upsert_opportunity(opp)
 
 
