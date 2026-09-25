@@ -45,6 +45,11 @@ _PHRASES: list[tuple[Intent, tuple[str, ...]]] = [
         "cheaper", "another insurer", "other insurer", "competitor", "compare",
         "comparing", "versus", " vs ", "difference between", "different from",
         "better than", "how are you different", "which plan",
+        # "Which is better, Plus or Essential?" names two products directly
+        # rather than using "compare"/"versus" wording, but is exactly as much
+        # a comparison request.
+        "which is better", "which one is better", "which is best",
+        "which one is best", "which should i choose", "which one should i choose",
     )),
     # Specific factual questions (claims, waiting period, eligibility, payment,
     # price) are checked before the family/corporate "orientation" intents

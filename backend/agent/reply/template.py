@@ -93,12 +93,16 @@ class TemplateComposer:
 
         lines = [_OPENERS.get(mode, _OPENERS[ReplyMode.ANSWER]).format(name=name)]
         if request.facts:
-            lines.extend(f"- {fact}" for fact in request.facts)
+            # No "- " bullet prefix: each fact is a complete sentence already,
+            # and the frontend renders each newline-separated line as its own
+            # paragraph, so this reads as a short flowing message rather than
+            # a formatted list.
+            lines.extend(request.facts)
         else:
             # No grounded fact to offer. Say so rather than improvising, so the gap
             # is visible instead of being filled with something plausible.
             lines.append(
-                "- I don't have a confirmed answer to hand, so I'd rather not guess."
+                "I don't have a confirmed answer to hand, so I'd rather not guess."
             )
         lines.append(_CLOSERS.get(mode, _CLOSERS[ReplyMode.ANSWER]))
         return self._outcome("\n".join(lines), request)
