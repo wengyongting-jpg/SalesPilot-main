@@ -18,7 +18,7 @@ from fastapi import APIRouter, Request
 
 from ...services import CaseNotFound, OpportunityNotFound
 from ...services.cases import parse_status
-from ...services.opportunities import score_explanation
+from ...services.opportunities import generate_staff_brief, score_explanation
 from ...services.seeding import seed
 from ...services.serialisation import (
     case_to_dict,
@@ -150,6 +150,18 @@ def get_score_explain(opportunity_id: str, request: Request) -> dict:
     if opportunity is None:
         raise OpportunityNotFound(opportunity_id)
     return score_explanation(opportunity)
+
+
+@router.post("/opportunities/{opportunity_id}/brief")
+def post_staff_brief(opportunity_id: str, request: Request) -> dict:
+    """Generate a staff-only handoff brief on demand. Requires an active case."""
+    repo = services_of(request).repo
+    if repo.get_opportunity(opportunity_id) is None:
+        raise OpportunityNotFound(opportunity_id)
+    result = generate_staff_brief(repo, opportunity_id)
+    if result is None:
+        raise errors.conflict("An active case is required")
+    return result
 
 
 @router.post("/opportunities/{opportunity_id}/rep-reply")

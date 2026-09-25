@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from ..domain.detection import Detection
-from ..domain.enums import Qualification
+from ..domain.enums import MessageRole, Qualification
 from ..domain.message import Message
 from ..domain.opportunity import Opportunity
 from ..kernel import next_best_action, scoring
@@ -40,6 +40,47 @@ def current_next_best_action(opp: Opportunity) -> NextBestAction:
 def score_explanation(opp: Opportunity) -> dict:
     """The audit trail behind the opportunity's current score and priority."""
     return scoring.explain(opp)
+
+
+def generate_staff_brief(repo: Repository, opportunity_id: str) -> Optional[dict]:
+    """On-demand staff-only handoff brief, grounded in the stored conversation.
+
+    `None` when there is no opportunity or no active case: a brief is for a
+    representative about to pick up a handoff, not a general-purpose summary,
+    so it is gated the same way a handoff itself is.
+
+    Template-only wording, deliberately: this route composes the same
+    grounded evidence a model-drafted brief would use, but does not invoke a
+    model itself, so it carries no new cost, latency or failure mode. A
+    model-drafted version is a separate, larger change if it is wanted later.
+    """
+    opp = repo.get_opportunity(opportunity_id)
+    case = repo.active_case_for(opportunity_id)
+    if opp is None or case is None:
+        return None
+    latest_customer = next(
+        (m for m in reversed(opp.messages) if m.role is MessageRole.CUSTOMER), None,
+    )
+    evidence = {
+        "need": opp.main_concern or "not yet established",
+        "product": opp.product.value,
+        "handoff_reason": case.reason,
+        "priority": opp.priority.value if opp.priority else "unknown",
+        "score": opp.final_score,
+        "keywords": [signal.value for signal in opp.signals[:5]],
+        "latest_message": latest_customer.text[:500] if latest_customer else "none",
+        "latest_message_id": latest_customer.id if latest_customer else None,
+    }
+    text = (
+        f"Need: {evidence['need']}\n"
+        f"Product: {evidence['product']}\n"
+        f"Handoff: {evidence['handoff_reason']}\n"
+        f"Priority / score: {evidence['priority']} / {evidence['score']}\n"
+        f"Keywords: {', '.join(evidence['keywords']) or 'none yet'}\n"
+        f"Latest customer message: {evidence['latest_message']}\n"
+        "Next step: Review the transcript, verify details and contact the customer."
+    )
+    return {"text": text, "source": "template", "evidence": evidence, "usage": None}
 
 
 def held(repo: Repository) -> list[Opportunity]:
