@@ -103,6 +103,21 @@ def build(spec: Optional[ProviderSpec] = None) -> BuiltModel:
     return BuiltModel(model=model, spec=spec, reason="configured")
 
 
+def effective_provider() -> tuple[str, bool]:
+    """The configured provider's name and whether it is offline.
+
+    No network call and no model constructed — just the same validation
+    `build()` does before it ever touches `pydantic_ai` (missing key, missing
+    model name, "offline" selected). For a status endpoint that may be polled
+    often, cheap and honest beats a live reachability check on every call;
+    `providers.probe()` remains the tool for an actual reachability check.
+    """
+    from ..providers import resolve
+
+    spec = resolve()
+    return spec.provider, spec.is_offline
+
+
 def _async_client(timeout: float):
     """An async HTTP client with our timeout, from whichever httpx is available."""
     try:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+from ..agent.model_factory import effective_provider
 from ..domain.enums import CaseStatus, OpportunityState, Priority, Qualification
 from ..storage.base import Repository
 
@@ -82,11 +83,12 @@ def compute_analytics(repo: Repository) -> dict:
 
 
 def health(repo: Repository) -> dict:
+    provider, degraded = effective_provider()
     return {
         "status": "ok",
         "conversations": len(repo.list_opportunities()),  # "conversations" is the API term for opportunities
         "opportunities": len(repo.list_opportunities()),  # Keep for backward compatibility
         "open_cases": sum(1 for c in repo.list_cases() if c.status is CaseStatus.OPEN),
-        "provider": "template",  # No model configured, using templates
-        "degraded": True,  # Template-only mode is degraded
+        "provider": provider,
+        "degraded": degraded,
     }
