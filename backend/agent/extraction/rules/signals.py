@@ -21,6 +21,7 @@ for nothing.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from ....domain.enums import Intent, Product, Signal
 
@@ -167,6 +168,27 @@ _INSURANCE_INTEREST = (
 
 _AFFIRMATIVE_HINTS = ("yes", "ok", "okay", "sure", "please", "go ahead", "right")
 
+# Common leetspeak/homoglyph digit-for-letter substitutions. A phrase match is
+# tried against both the plain-lowercased text and this de-leeted copy, so a
+# restricted-topic phrase like "discount" cannot dodge escalation by being
+# spelled "disc0unt" — escalation gates (`kernel.hitl`) must not be this easy
+# to route around with trivial obfuscation.
+_LEET_MAP = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+def _deleet(text: str) -> str:
+    return text.translate(_LEET_MAP)
+
+
+def _strip_invisible(text: str) -> str:
+    """Drop Unicode "format" characters (zero-width space/joiner, bidi
+    controls, byte-order mark, ...) that render as nothing but still break a
+    literal substring match. `"disc​ount"` reads identically to "discount" to
+    a person and to any UI, so it must match "discount" here too rather than
+    silently slipping past every restricted-topic phrase.
+    """
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
 
 def detect(
     text: str,
@@ -175,11 +197,13 @@ def detect(
     context: list | None = None,
 ) -> tuple[list[Signal], list[str]]:
     """Return the signals present and the concerns they imply."""
-    normalised = f" {text.lower().strip()} "
+    cleaned = _strip_invisible(text)
+    normalised = f" {cleaned.lower().strip()} "
+    deleeted = f" {_deleet(cleaned.lower().strip())} "
     signals: list[Signal] = []
 
     for signal, phrases in _PHRASES:
-        if any(phrase in normalised for phrase in phrases):
+        if any(phrase in normalised or phrase in deleeted for phrase in phrases):
             signals.append(signal)
 
     if _FAMILY_COUNT.search(normalised) and Signal.EXPANSION_FAMILY not in signals:
@@ -253,11 +277,11 @@ def explicit_application_preparation(text: str) -> bool:
 
 
 def is_postponement(text: str) -> bool:
-    return any(phrase in text.lower() for phrase in POSTPONE_PHRASES)
+    return any(phrase in _strip_invisible(text).lower() for phrase in POSTPONE_PHRASES)
 
 
 def is_cancellation(text: str) -> bool:
-    return any(phrase in text.lower() for phrase in CANCEL_PHRASES)
+    return any(phrase in _strip_invisible(text).lower() for phrase in CANCEL_PHRASES)
 
 
 def is_solicitation(text: str) -> bool:
@@ -267,7 +291,7 @@ def is_solicitation(text: str) -> bool:
     counts only when the message shows no interest in being insured, which keeps the
     marker specific enough to be worth pairing with a model judgement.
     """
-    lowered = text.lower()
+    lowered = _strip_invisible(text).lower()
     if any(phrase in lowered for phrase in SOLICITATION_PHRASES):
         return True
     if _URL.search(lowered) and not any(
